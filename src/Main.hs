@@ -18,6 +18,7 @@ dslFile = do
 data Op =
     Rep Int Int
   | Data String
+  | Copy Int Int
   deriving  (Show, Eq)
 
 instance FromLuaStack Op where
@@ -28,6 +29,10 @@ instance FromLuaStack Op where
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
         return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len)
+      "copy" -> do
+        from <- getField Lua.tointeger "from"
+        len <- getField Lua.tointeger "len"
+        return $ Copy (fromInteger $ toInteger from) (fromInteger $ toInteger len)
       "data" -> do
         str <- getField Lua.peek "string"
         return $ Data str
@@ -38,16 +43,18 @@ instance FromLuaStack Op where
             Lua.remove (-1)
             return v
 
-
-main :: IO ()
-main = do
-  [ file ] <- getArgs
+readProgram :: String -> IO [Op]
+readProgram filename = do
   dslPath <- dslFile
-  putStrLn dslPath
   Lua.runLua $ do
     Lua.openlibs
 
     Lua.dofile dslPath
-    Lua.dofile file
-    x <- Lua.getglobal "program" *> peek (-1)
-    liftIO $ putStrLn $ show (x :: [Op])
+    Lua.dofile filename
+    Lua.getglobal "program" *> peek (-1)
+
+main :: IO ()
+main = do
+  [ filename ] <- getArgs
+  program <- readProgram filename
+  putStrLn $ show program

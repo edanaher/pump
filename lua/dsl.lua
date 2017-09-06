@@ -8,7 +8,14 @@ function rep(args)
 end
 
 function data(args)
-  args.type = "data"
+  if args.string then
+    args.type = "data"
+  elseif args.from then
+    args.type = "copy"
+    if args.from and args.to and not args.len then
+      args.len = args.to - args.from
+    end
+  end
   table.insert(program, args)
 end
 
