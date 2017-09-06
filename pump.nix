@@ -8,4 +8,9 @@ mkDerivation {
   executableHaskellDepends = [ base hslua_0_8_0 ];
   description = "Compiler targeting deflate compressed streasm (gzip, zip, etc.)";
   license = stdenv.lib.licenses.bsd3;
+  postInstall =
+    ''
+      mkdir $out/lua
+      cp lua/dsl.lua $out/lua
+    '';
 }
