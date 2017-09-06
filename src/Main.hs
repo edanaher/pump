@@ -2,6 +2,8 @@
 module Main where
 
 import Data.List (intercalate)
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as Char8
 import System.Directory (makeAbsolute)
 import System.Environment (getArgs, getExecutablePath)
 
@@ -53,8 +55,17 @@ readProgram filename = do
     Lua.dofile filename
     Lua.getglobal "program" *> peek (-1)
 
+data ByteOp =
+    Bytes B.ByteString
+  | Zero Int Int
+
+toBytes :: Op -> B.ByteString
+toBytes op = case op of
+  Data str -> Char8.pack str
+  _ -> "Unknown"
+
 main :: IO ()
 main = do
   [ filename ] <- getArgs
   program <- readProgram filename
-  putStrLn $ show program
+  putStrLn $ show (map toBytes program)

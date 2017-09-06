@@ -18,6 +18,3 @@ function data(args)
   end
   table.insert(program, args)
 end
-
-print("DSL loaded!")
-loaded = 99
