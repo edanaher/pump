@@ -1,7 +1,7 @@
 module Main where
 
 import System.Directory (makeAbsolute)
-import System.Environment (getExecutablePath)
+import System.Environment (getArgs, getExecutablePath)
 
 import Foreign.Lua as Lua
 
@@ -15,11 +15,13 @@ dslFile = do
 
 main :: IO ()
 main = do
+  [ file ] <- getArgs
   dslPath <- dslFile
   putStrLn dslPath
   Lua.runLua $ do
     Lua.openlibs
 
     Lua.dofile dslPath
+    Lua.dofile file
     x <- Lua.getglobal "loaded" *> peek (-1)
     liftIO $ putStrLn x
