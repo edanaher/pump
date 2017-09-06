@@ -18,3 +18,15 @@ function data(args)
   end
   table.insert(program, args)
 end
+
+function print(args)
+  if args.string then
+    args.type = "print"
+  elseif args.from then
+    args.type = "copy"
+    if args.from and args.to and not args.len then
+      args.len = args.to - args.from
+    end
+  end
+  table.insert(program, args)
+end

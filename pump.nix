@@ -6,7 +6,7 @@ mkDerivation {
   isLibrary = false;
   isExecutable = true;
   executableHaskellDepends = [ base hslua_0_8_0 ];
-  description = "Compiler targeting deflate compressed streasm (gzip, zip, etc.)";
+  description = "Compiler targeting deflate compressed streams (gzip, zip, etc.)";
   license = stdenv.lib.licenses.bsd3;
   postInstall =
     ''
