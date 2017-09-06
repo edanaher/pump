@@ -1,6 +1,9 @@
 program = { }
 function rep(args)
   args.type = "rep"
+  if args.from and args.to and not args.len then
+    args.len = args.to - args.from
+  end
   table.insert(program, args)
 end
 
