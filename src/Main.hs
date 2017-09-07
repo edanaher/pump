@@ -23,8 +23,8 @@ dslFile = do
   makeAbsolute $ (dirpath exePath) ++ "/../lua/dsl.lua"
 
 data Op =
-    Rep Int Int (Maybe Int)
-  | Print String
+    Rep Int Int (Maybe Int) Bool
+  | Print String Bool
   | Data B.ByteString
   | Copy Int Int
   deriving  (Show, Eq)
@@ -37,10 +37,12 @@ instance Lua.FromLuaStack Op where
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
         at <- getFieldOpt (liftM fromInteger . liftM toInteger . Lua.tointeger) "at"
-        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at
+        final <- getFieldBool "final"
+        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at final
       "print" -> do
         str <- getField Lua.peek "string"
-        return $ Print str
+        final <- getFieldBool "final"
+        return $ Print str final
       "copy" -> do
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
@@ -62,6 +64,14 @@ instance Lua.FromLuaStack Op where
               v <- peek (-1)
               Lua.remove (-1)
               return $ Just v
+          getFieldBool f = do
+            Lua.pushstring f
+            Lua.gettable (idx - 1)
+            isnil <- Lua.isnil (-1)
+            if isnil then Lua.remove (-1) >> return False else do
+              v <- Lua.peek (-1)
+              Lua.remove (-1)
+              return $ v
 
 readProgram :: String -> IO [Op]
 readProgram filename = do
@@ -81,19 +91,19 @@ intToBytes :: Int -> Int -> B.ByteString
 intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..len-1] ]
 
 outputSize :: Op -> Int
-outputSize (Print str) = length str
-outputSize (Rep _ len _) = len
+outputSize (Print str _) = length str
+outputSize (Rep _ len _ _) = len
 outputSize _ = 0
 
 toBytes :: Op -> Int -> B.ByteString
 toBytes op pos = case op of
   Data str -> str
-  Print str -> "\000" `Char8.append`
-               (intToBytes 2 $ length str) `Char8.append`
-               (intToBytes 2 $ 65535 - length str) `Char8.append`
-               Char8.pack str
-  Rep from len (Just at) -> Rep.encode from len at
-  Rep from len Nothing -> Rep.encode from len pos
+  Print str final -> (if final then "\001" else "\000") `Char8.append`
+                     (intToBytes 2 $ length str) `Char8.append`
+                     (intToBytes 2 $ 65535 - length str) `Char8.append`
+                     Char8.pack str
+  Rep from len (Just at) final -> Rep.encode from len at final
+  Rep from len Nothing final -> Rep.encode from len pos final
   _ -> "Unknown"
 
 writeGzip filename bytes =
@@ -104,7 +114,7 @@ progToBytes program =
   reverse $ fst $ foldl (\ (prog, pos) op ->
       let bytes = toBytes op pos
           pos' = if pos == -1 then -- Hack - assume first print is start of executable
-                   case op of Print _ -> outputSize op
+                   case op of Print _ _ -> outputSize op
                               _ -> -1
                  else pos + outputSize op
       in (bytes:prog, pos'))

@@ -56,11 +56,11 @@ bitsForDist d =
   in base ++ extra
 
 
-bits :: Int -> Int -> [Int]
-bits dist len =
-  [ 0, 1, 0 ] ++ bitsForLen len ++ bitsForDist dist ++ [ 0, 0, 0, 0, 0, 0, 0 ] ++ [1, 0, 0]
+bits :: Int -> Int -> Bool -> [Int]
+bits dist len final =
+  [ 0, 1, 0 ] ++ bitsForLen len ++ bitsForDist dist ++ [ 0, 0, 0, 0, 0, 0, 0 ] ++ [(if final then 1 else 0), 0, 0]
 
-encode from len at =
+encode from len at final =
   let dist = if from < 0 then -from else at - from
-      reps = packBits $ bits dist len in
+      reps = packBits $ bits dist len final in
   reps `B.append` B.pack [0, 0, 255, 255]

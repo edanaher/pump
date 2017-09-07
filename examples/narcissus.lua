@@ -3,8 +3,9 @@ data { string = "\000\000\000\000" } -- header
 data { string = "\000\003" }         -- header
 print { string = "hi there" }
 rep { from = 2, len = 6 }
-data { string = "\154\172\013\201" } -- checksum
-data { string = "\014\000\000\000" } -- size
+rep { from = 0, len = 3, final = true }
+data { string = "\027\001\083\186" } -- checksum
+data { string = "\017\000\000\000" } -- size
 
 
 
