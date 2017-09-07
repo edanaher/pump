@@ -21,7 +21,7 @@ dslFile = do
   makeAbsolute $ (dirpath exePath) ++ "/../lua/dsl.lua"
 
 data Op =
-    Rep Int Int
+    Rep Int Int Int
   | Print String
   | Data B.ByteString
   | Copy Int Int
@@ -34,7 +34,8 @@ instance FromLuaStack Op where
       "rep" -> do
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
-        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len)
+        at <- getField Lua.tointeger "at"
+        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) (fromInteger $ toInteger at)
       "print" -> do
         str <- getField Lua.peek "string"
         return $ Print str
@@ -76,7 +77,7 @@ toBytes op = case op of
                (intToBytes 2 $ length str) `Char8.append`
                (intToBytes 2 $ 65535 - length str) `Char8.append`
                Char8.pack str
-  Rep from len -> Rep.encode from len
+  Rep from len at -> Rep.encode from len at
   _ -> "Unknown"
 
 writeGzip filename bytes =
