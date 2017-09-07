@@ -2,15 +2,17 @@
 module Main where
 
 import Data.List (intercalate)
+import Control.Monad (liftM)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as Char8
 import System.Directory (makeAbsolute)
 import System.Environment (getArgs, getExecutablePath)
 import Data.Bits (shiftR, (.&.))
+import Debug.Trace (trace)
 
 import Rep
 
-import Foreign.Lua as Lua
+import qualified Foreign.Lua as Lua
 
 dirpath :: String -> String
 dirpath = reverse . dropWhile (/= '/') . reverse
@@ -21,21 +23,21 @@ dslFile = do
   makeAbsolute $ (dirpath exePath) ++ "/../lua/dsl.lua"
 
 data Op =
-    Rep Int Int Int
+    Rep Int Int (Maybe Int)
   | Print String
   | Data B.ByteString
   | Copy Int Int
   deriving  (Show, Eq)
 
-instance FromLuaStack Op where
+instance Lua.FromLuaStack Op where
   peek idx = do
-    tp <- getField Lua.peek "type" :: Lua String
+    tp <- getField Lua.peek "type" :: Lua.Lua String
     case tp of
       "rep" -> do
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
-        at <- getField Lua.tointeger "at"
-        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) (fromInteger $ toInteger at)
+        at <- getFieldOpt (liftM fromInteger . liftM toInteger . Lua.tointeger) "at"
+        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at
       "print" -> do
         str <- getField Lua.peek "string"
         return $ Print str
@@ -52,6 +54,14 @@ instance FromLuaStack Op where
             v <- peek (-1)
             Lua.remove (-1)
             return v
+          getFieldOpt peek f = do
+            Lua.pushstring f
+            Lua.gettable (idx - 1)
+            isnil <- Lua.isnil (-1)
+            if isnil then Lua.remove (-1) >> return Nothing else do
+              v <- peek (-1)
+              Lua.remove (-1)
+              return $ Just v
 
 readProgram :: String -> IO [Op]
 readProgram filename = do
@@ -61,7 +71,7 @@ readProgram filename = do
 
     Lua.dofile dslPath
     Lua.dofile filename
-    Lua.getglobal "program" *> peek (-1)
+    Lua.getglobal "program" *> Lua.peek (-1)
 
 data ByteOp =
     Bytes B.ByteString
@@ -70,23 +80,40 @@ data ByteOp =
 intToBytes :: Int -> Int -> B.ByteString
 intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..len-1] ]
 
-toBytes :: Op -> B.ByteString
-toBytes op = case op of
+outputSize :: Op -> Int
+outputSize (Print str) = length str
+outputSize (Rep _ len _) = len
+outputSize _ = 0
+
+toBytes :: Op -> Int -> B.ByteString
+toBytes op pos = case op of
   Data str -> str
   Print str -> "\000" `Char8.append`
                (intToBytes 2 $ length str) `Char8.append`
                (intToBytes 2 $ 65535 - length str) `Char8.append`
                Char8.pack str
-  Rep from len at -> Rep.encode from len at
+  Rep from len (Just at) -> Rep.encode from len at
+  Rep from len Nothing -> Rep.encode from len pos
   _ -> "Unknown"
 
 writeGzip filename bytes =
   B.writeFile filename (foldl B.append B.empty bytes)
 
+progToBytes :: [Op] -> [B.ByteString]
+progToBytes program =
+  reverse $ fst $ foldl (\ (prog, pos) op ->
+      let bytes = toBytes op pos
+          pos' = if pos == -1 then -- Hack - assume first print is start of executable
+                   case op of Print _ -> outputSize op
+                              _ -> -1
+                 else pos + outputSize op
+      in (bytes:prog, pos'))
+    ([], -1) program
+
 main :: IO ()
 main = do
   [ filename ] <- getArgs
   program <- readProgram filename
-  bytes <- return $ map toBytes program
+  bytes <- return $ progToBytes program
   putStrLn $ show bytes
   writeGzip "out.gz" bytes
