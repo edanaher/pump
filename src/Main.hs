@@ -8,6 +8,8 @@ import qualified Data.ByteString.Char8 as Char8
 import System.Directory (makeAbsolute)
 import System.Environment (getArgs, getExecutablePath)
 import Data.Bits (shiftR, (.&.))
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Debug.Trace (trace)
 
 import Rep
@@ -27,6 +29,7 @@ data Op =
   | Print String Bool
   | Data B.ByteString
   | Copy Int Int
+  | Label String
   deriving  (Show, Eq)
 
 instance Lua.FromLuaStack Op where
@@ -50,6 +53,9 @@ instance Lua.FromLuaStack Op where
       "data" -> do
         str <- getField Lua.tostring "string"
         return $ Data str
+      "label" -> do
+        str <- getField Lua.peek "name"
+        return $ Label str
     where getField peek f = do
             Lua.pushstring f
             Lua.gettable (idx - 1)
@@ -73,15 +79,34 @@ instance Lua.FromLuaStack Op where
               Lua.remove (-1)
               return $ v
 
-readProgram :: String -> IO [Op]
-readProgram filename = do
+loadLuaLabels :: Maybe (Map String Int) -> Lua.Lua ()
+loadLuaLabels labels =
+  case labels of
+    Nothing -> return ()
+    Just ls -> do
+      Lua.push (Map.map (fromInteger . toInteger) ls :: Map String Lua.LuaInteger)
+      Lua.setglobal "l" 
+      Lua.dostring "setmetatable(l, label_err_mt)"
+      return ()
+
+readProgram :: String -> Maybe (Map String Int) -> IO [Op]
+readProgram filename labels = do
   dslPath <- dslFile
   Lua.runLua $ do
     Lua.openlibs
 
     Lua.dofile dslPath
+    loadLuaLabels labels
     Lua.dofile filename
     Lua.getglobal "program" *> Lua.peek (-1)
+
+initLabels :: [Op] -> Map String Int
+initLabels program =
+  fst $ foldl (\ (labels, pos) op -> case op of
+      Label str -> (Map.insert str pos labels, pos)
+      _ -> (labels, pos + 3)
+  ) (Map.empty, 0) program
+
 
 data ByteOp =
     Bytes B.ByteString
@@ -96,34 +121,47 @@ outputSize (Rep _ len _ _) = len
 outputSize _ = 0
 
 toBytes :: Op -> Int -> B.ByteString
-toBytes op pos = case op of
+toBytes op opos = case op of
   Data str -> str
   Print str final -> (if final then "\001" else "\000") `Char8.append`
                      (intToBytes 2 $ length str) `Char8.append`
                      (intToBytes 2 $ 65535 - length str) `Char8.append`
                      Char8.pack str
   Rep from len (Just at) final -> Rep.encode from len at final
-  Rep from len Nothing final -> Rep.encode from len pos final
-  _ -> "Unknown"
+  Rep from len Nothing final -> trace (show from ++ "/" ++ show len ++ " at " ++ " / o" ++ show opos) $ Rep.encode from len opos final
+  Label _ -> B.empty
+  _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
 
 writeGzip filename bytes =
   B.writeFile filename (foldl B.append B.empty bytes)
 
-progToBytes :: [Op] -> [B.ByteString]
-progToBytes program =
-  reverse $ fst $ foldl (\ (prog, pos) op ->
-      let bytes = toBytes op pos
-          pos' = if pos == -1 then -- Hack - assume first print is start of executable
-                   case op of Print _ _ -> outputSize op
-                              _ -> -1
-                 else pos + outputSize op
-      in (bytes:prog, pos'))
-    ([], -1) program
+progToBytesWithLabels labels filename = do
+  program <- readProgram filename $ Just labels
+  (prog, labels', pos, opos) <- return $ foldl (\ (prog, labels, pos, opos) op ->
+        let bytes = toBytes op opos
+            labels' = case op of Label str -> Map.insert str pos labels
+                                 _ -> labels
+            pos' = pos + B.length bytes
+            opos' = if opos == -1 then -- Hack - assume first print is start of executable
+                      case op of Print _ _ -> outputSize op
+                                 _ -> -1
+                    else opos + outputSize op
+        in (bytes:prog, labels', pos', opos'))
+        ([], Map.empty, 0, -1) program
+  trace (show labels ++ " => " ++ show labels') $ return (reverse prog, labels')
+
+progToBytes :: Map String Int -> String -> IO [B.ByteString]
+progToBytes labels filename = do
+  (prog, labels') <- progToBytesWithLabels labels filename
+  if labels == labels'
+  then return prog
+  else progToBytes labels' filename
 
 main :: IO ()
 main = do
   [ filename ] <- getArgs
-  program <- readProgram filename
-  bytes <- return $ progToBytes program
+  program <- readProgram filename Nothing
+  labels <- return $ initLabels program
+  bytes <- progToBytes labels filename
   putStrLn $ show bytes
   writeGzip "out.gz" bytes

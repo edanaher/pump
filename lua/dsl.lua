@@ -1,3 +1,5 @@
+debug = print
+
 program = { }
 function rep(args)
   args.type = "rep"
@@ -30,3 +32,12 @@ function print(args)
   end
   table.insert(program, args)
 end
+
+function _(str)
+  table.insert(program, { type = "label", name = str })
+end
+
+l = {}
+label_mt = { __index = function() return 0 end }
+label_err_mt = { __index = function(self, key) error("Unknown label: " .. key) end }
+setmetatable(l, label_mt)
