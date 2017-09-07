@@ -27,6 +27,12 @@ unlg4 k | k < 0 = 0
 unlg4 k | 0 <= k && k <= 3 = k + 4
 unlg4 k = 2 * unlg4 (k - 4)
 
+distCode k | k < 4 = k
+distCode k | k >= 4 = 2 + distCode (k `div` 2)
+
+unDistCode n | n < 4 = n
+unDistCode n | n >= 4 = 2 * unDistCode (n - 2)
+
 packBits :: [Int] -> B.ByteString
 packBits bits =
   let getByte bits = fromIntegral $ foldl (\n b -> 2*n + b) 0 bits
@@ -36,25 +42,22 @@ packBits bits =
 
 bitsForLen l =
   if l < 11 then toBitsR 7 (1 + (l - 3)) else
-  let base = if l < 115 then toBitsR 7 $ lg4 (l - 3) + 5
-                        else toBitsR 8 $ 0xC0 + lg4 (l - 3) - 19
+  let base = if l == 258 then toBitsR 8 $ 0xC5 else
+             if l < 115  then toBitsR 7 $ lg4 (l - 3) + 5
+                         else toBitsR 8 $ 0xC0 + lg4 (l - 3) - 19
       extra = if l == 258 then [] else
               toBits (lg (l - 3) - 2) ((l - 3) - unlg4 (lg4 (l - 3)))
   in base ++ extra
 
 bitsForDist d =
   if d < 5 then toBitsR 5 (d - 1) else
-  let base = toBitsR 5 $ lg (d - 1) + 2
-      extra = toBits (lg (d - 1) - 1) $ (d - 1) - unlg2 (lg $ d - 1)
-  in
-  trace ("d is " ++ show d ++ " => " ++ show base ++ " and " ++ show extra ) $
-  base ++ extra
+  let base = toBitsR 5 $ distCode $ d - 1
+      extra = toBits (lg (d - 1) - 1) $ (d - 1) - unDistCode (distCode $ d - 1)
+  in base ++ extra
 
 
 bits :: Int -> Int -> [Int]
 bits dist len =
-  trace ("len: " ++ show len ++ " -> " ++ (show $ bitsForLen len)) $
-  trace ("dist: " ++ show dist ++ " -> " ++ (show $ bitsForDist len)) $
   [ 0, 1, 0 ] ++ bitsForLen len ++ bitsForDist dist ++ [ 0, 0, 0, 0, 0, 0, 0 ] ++ [1, 0, 0]
 
 encode from len at =
