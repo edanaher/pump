@@ -153,7 +153,7 @@ progToBytesWithLabels labels filename = do
                                  _ -> labels
             pos' = pos + B.length bytes
             opos' = if opos == -1 then -- Hack - assume first print is start of executable
-                      case op of Print _ _ -> outputSize op
+                      case op of Label "_start" -> 0
                                  _ -> -1
                     else opos + outputSize op
         in (bytes:prog, labels', pos', opos'))
