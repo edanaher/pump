@@ -25,9 +25,9 @@ dslFile = do
   makeAbsolute $ (dirpath exePath) ++ "/../lua/dsl.lua"
 
 data Op =
-    Rep Int Int (Maybe Int) Bool
+    Rep Int Int (Maybe Int) Bool Bool
   | Print String Bool
-  | PrintLen Int Bool
+  | PrintLen Int Bool Bool
   | Data B.ByteString
   | Copy Int Int
   | Label String
@@ -42,7 +42,8 @@ instance Lua.FromLuaStack Op where
         len <- getField Lua.tointeger "len"
         at <- getFieldOpt (liftM fromInteger . liftM toInteger . Lua.tointeger) "at"
         final <- getFieldBool "final"
-        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at final
+        isdata <- getFieldBool "isdata"
+        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at final isdata
       "print" -> do
         final <- getFieldBool "final"
         str <- getFieldOpt Lua.peek "string"
@@ -50,7 +51,8 @@ instance Lua.FromLuaStack Op where
           Just s -> return $ Print s final
           Nothing -> do
             len <- getField Lua.tointeger "len"
-            return $ PrintLen (fromInteger $ toInteger len) False
+            isdata <- getFieldBool "isdata"
+            return $ PrintLen (fromInteger $ toInteger len) final isdata
       "copy" -> do
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
@@ -132,8 +134,8 @@ intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..
 
 outputSize :: Op -> Int
 outputSize (Print str _) = length str
-outputSize (PrintLen len _) = len
-outputSize (Rep _ len _ _) = len
+outputSize (PrintLen len _ False) = len
+outputSize (Rep _ len _ _ False) = len
 outputSize _ = 0
 
 toBytes :: Op -> Int -> B.ByteString
@@ -143,11 +145,11 @@ toBytes op opos = case op of
                      (intToBytes 2 $ length str) `Char8.append`
                      (intToBytes 2 $ 65535 - length str) `Char8.append`
                      Char8.pack str
-  PrintLen len final -> (if final then "\001" else "\000") `Char8.append`
-                        (intToBytes 2 $ len) `Char8.append`
-                        (intToBytes 2 $ 65535 - len)
-  Rep from len (Just at) final -> Rep.encode from len at final
-  Rep from len Nothing final -> trace (show from ++ "/" ++ show len ++ " at " ++ " / o" ++ show opos) $ Rep.encode from len opos final
+  PrintLen len final _ -> (if final then "\001" else "\000") `Char8.append`
+                          (intToBytes 2 $ len) `Char8.append`
+                          (intToBytes 2 $ 65535 - len)
+  Rep from len (Just at) final _ -> Rep.encode from len at final
+  Rep from len Nothing final _ -> trace (show from ++ "/" ++ show len ++ " at " ++ " / o" ++ show opos) $ Rep.encode from len opos final
   Label _ -> B.empty
   _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
 
