@@ -27,6 +27,7 @@ dslFile = do
 data Op =
     Rep Int Int (Maybe Int) Bool
   | Print String Bool
+  | PrintLen Int Bool
   | Data B.ByteString
   | Copy Int Int
   | Label String
@@ -43,9 +44,13 @@ instance Lua.FromLuaStack Op where
         final <- getFieldBool "final"
         return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at final
       "print" -> do
-        str <- getField Lua.peek "string"
         final <- getFieldBool "final"
-        return $ Print str final
+        str <- getFieldOpt Lua.peek "string"
+        case str of
+          Just s -> return $ Print s final
+          Nothing -> do
+            len <- getField Lua.tointeger "len"
+            return $ PrintLen (fromInteger $ toInteger len) False
       "copy" -> do
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
@@ -127,6 +132,7 @@ intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..
 
 outputSize :: Op -> Int
 outputSize (Print str _) = length str
+outputSize (PrintLen len _) = len
 outputSize (Rep _ len _ _) = len
 outputSize _ = 0
 
@@ -137,6 +143,9 @@ toBytes op opos = case op of
                      (intToBytes 2 $ length str) `Char8.append`
                      (intToBytes 2 $ 65535 - length str) `Char8.append`
                      Char8.pack str
+  PrintLen len final -> (if final then "\001" else "\000") `Char8.append`
+                        (intToBytes 2 $ len) `Char8.append`
+                        (intToBytes 2 $ 65535 - len)
   Rep from len (Just at) final -> Rep.encode from len at final
   Rep from len Nothing final -> trace (show from ++ "/" ++ show len ++ " at " ++ " / o" ++ show opos) $ Rep.encode from len opos final
   Label _ -> B.empty

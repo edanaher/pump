@@ -22,7 +22,7 @@ function data(args)
 end
 
 function print(args)
-  if args.string then
+  if args.string or args.len then
     args.type = "print"
   elseif args.from then
     args.type = "copy"
