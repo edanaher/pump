@@ -39,5 +39,5 @@ end
 
 l = {}
 label_mt = { __index = function() return 0 end }
-label_err_mt = { __index = function(self, key) error("Unknown label: " .. key) end }
+label_err_mt = { __index = function(self, key) error("Unknown label: " .. key, 2) end }
 setmetatable(l, label_mt)

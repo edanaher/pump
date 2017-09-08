@@ -85,9 +85,19 @@ loadLuaLabels labels =
     Nothing -> return ()
     Just ls -> do
       Lua.push (Map.map (fromInteger . toInteger) ls :: Map String Lua.LuaInteger)
-      Lua.setglobal "l" 
+      Lua.setglobal "l"
       Lua.dostring "setmetatable(l, label_err_mt)"
       return ()
+
+loadFileUnsafe :: String -> Lua.Lua ()
+loadFileUnsafe filename = do
+  status <- Lua.loadfile filename
+  if status == Lua.OK then do
+    status <- Lua.call 0 0
+    return ()
+  else do
+    err <- Lua.peek (-1)
+    error $ "Error loading file '" ++ filename ++ "':" ++ err
 
 readProgram :: String -> Maybe (Map String Int) -> IO [Op]
 readProgram filename labels = do
@@ -95,9 +105,9 @@ readProgram filename labels = do
   Lua.runLua $ do
     Lua.openlibs
 
-    Lua.dofile dslPath
+    loadFileUnsafe dslPath
     loadLuaLabels labels
-    Lua.dofile filename
+    loadFileUnsafe filename
     Lua.getglobal "program" *> Lua.peek (-1)
 
 initLabels :: [Op] -> Map String Int
