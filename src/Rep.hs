@@ -63,7 +63,7 @@ bits dist len final =
 encode from len at final =
   let dist = if from < 0 then -from else at - from
       reps = packBits $ bits dist len final in
-  reps `B.append` B.pack [0, 0, 255, 255]
+  trace ("Encoding " ++ show from ++ " len " ++ show len ++ " at " ++ show at) $ reps `B.append` B.pack [0, 0, 255, 255]
 
 -- This really shouldn't compute the whole thing, but it's easy
 size from len at final =

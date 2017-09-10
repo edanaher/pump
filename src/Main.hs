@@ -136,25 +136,28 @@ readProgram filename labels = do
     Lua.getglobal "program" *> Lua.peek (-1)
 
 initSizes :: [Op] -> [Command]
-initSizes = map $ \op -> Com op $ case op of
-    Rep _ _ _ _ _ -> 8
-    Print str _ -> length str + 5
-    PrintLen len _ _ -> 5
-    Data str -> B.length str
-    Copy _ len -> len
-    Label _ -> 0
+initSizes = snd . mapAccumL (\(pos, opos) op -> 
+    let (size, osize) = case op of
+          Rep _ len _ _ _ -> (8, len)
+          Print str _ -> (length str + 5, length str)
+          PrintLen len _ _ -> (5, len)
+          Data str -> (B.length str, 0)
+          Copy _ len -> (len, 10)
+          Label _ -> (0, 0)
+    in ((pos + size, opos + osize), (Com op size osize (pos + size) (opos + osize)))) (0, 0)
 
 initLabels :: [Command] -> Map String Int
-initLabels program =
-  fst $ foldl (\ (labels, pos) (Com op size) -> case op of
-      Label str -> (Map.insert str pos labels, pos)
-      _ -> (labels, pos + size)
-  ) (Map.empty, 0) program
+initLabels =
+  Map.fromList .
+  map (\ (Com (Label str) _ _ pos _) -> (str, pos)) .
+  filter (\ (Com op size osize pos opos) -> case op of
+              Label str -> True
+              _ -> False)
 
 updateSizes :: Map String Int -> [Command] -> [Op] -> ([Command], Map String Int)
 updateSizes labels prog ops = do
-  (prog', labels', pos, opos) <- return $ foldl (\ (prog, labels, pos, opos) op ->
-        let bytes = toBytes op opos
+  (prog', labels', pos, opos) <- return $ foldl (\ (prog', labels, pos, opos) op ->
+        let bytes = toBytes prog op opos
             labels' = case op of Label str -> Map.insert str pos labels
                                  _ -> labels
             pos' = pos + B.length bytes
@@ -162,12 +165,14 @@ updateSizes labels prog ops = do
                       case op of Label "_start" -> 0
                                  _ -> -1
                     else opos + outputSize op
-        in ((Com op (B.length bytes)):prog, labels', pos', opos'))
+            osize = if opos' <= 0 then 0 else opos' - opos
+        in ((Com op (B.length bytes) osize (pos') (opos')):prog', labels', pos', opos'))
         ([], Map.empty, 0, -1) ops
-  trace (show labels ++ " => " ++ show labels') $ (reverse prog', labels')
+  trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
 
 fixSizes :: Map String Int -> [Command] -> String -> IO [Command]
 fixSizes labels prog filename = do
+  _ <- trace ("Fixing sizes on:\n" ++ showProg prog) $ return 0
   ops' <- readProgram filename $ Just labels
   (prog', labels') <- return $ updateSizes labels prog ops'
   if prog == prog'
@@ -187,8 +192,17 @@ outputSize (PrintLen len _ False) = len
 outputSize (Rep _ len _ _ False) = len
 outputSize _ = 0
 
-toBytes :: Op -> Int -> B.ByteString
-toBytes op opos = case op of
+posToOpos :: [Command] ->  Int -> Int
+posToOpos [] target = error "Ran out of command searching for pos"
+posToOpos _ 0 = 0
+posToOpos (Com op size osize pos opos:coms') target =
+    trace ("Searching for " ++ show target ++ " at " ++ show (Com op size osize pos opos)) $
+    if target < pos then error "Converting pos to opos isn't a boundary" else
+    if target == pos then opos else
+    posToOpos coms' target
+
+toBytes :: [Command] -> Op -> Int -> B.ByteString
+toBytes coms op opos = case op of
   Data str -> str
   Print str final -> (if final then "\001" else "\000") `Char8.append`
                      (intToBytes 2 $ length str) `Char8.append`
@@ -197,8 +211,8 @@ toBytes op opos = case op of
   PrintLen len final _ -> (if final then "\001" else "\000") `Char8.append`
                           (intToBytes 2 $ len) `Char8.append`
                           (intToBytes 2 $ 65535 - len)
-  Rep from len (Just at) final _ -> Rep.encode from len at final
-  Rep from len Nothing final _ -> {-trace (show from ++ "/" ++ show len ++ " at " ++ " / o" ++ show opos) $-} Rep.encode from len opos final
+  Rep from len (Just at) final _ -> Rep.encode from len (posToOpos coms at) final
+  Rep from len Nothing final _ -> trace (show from ++ "/" ++ show len ++ " at " ++ "o" ++ show opos ++ " from \n" ++ showProg coms) $ trace (show ("opos: " ++ show (posToOpos coms from))) $ Rep.encode from len opos final
   Label _ -> B.empty
   _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
 
@@ -207,8 +221,8 @@ writeGzip filename bytes =
 
 progToBytes :: [Command] -> [B.ByteString]
 progToBytes program =
-  let (prog, pos, opos) = foldl (\ (prog, pos, opos) (Com op size) ->
-        let bytes = toBytes op opos
+  let (prog, pos, opos) = foldl (\ (prog, pos, opos) (Com op size osize _ _) ->
+        let bytes = toBytes program op opos
             pos' = pos + B.length bytes
             opos' = if opos == -1 then -- Hack - assume first print is start of executable
                       case op of Label "_start" -> 0
