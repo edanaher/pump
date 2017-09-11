@@ -156,18 +156,24 @@ initLabels =
 
 updateSizes :: Map String Int -> [Command] -> [Op] -> ([Command], Map String Int)
 updateSizes labels prog ops = do
-  (prog', labels', pos, opos) <- return $ foldl (\ (prog', labels, pos, opos) op ->
+  (prog', labels', pos, opos, eatlen) <- return $ foldl (\ (prog', labels, pos, opos, eatlen) (op, com) ->
         let bytes = toBytes prog op opos
+            (Com _ size _ _ _) = com
             labels' = case op of Label str -> Map.insert str pos labels
                                  _ -> labels
             pos' = pos + B.length bytes
-            osize = if opos < 0 then 0 else outputSize op
-            opos' = if opos == -1 then -- Hack - assume first print is start of executable
+            osize' = if opos < 0 || eatlen > 0 then 0 else outputSize op
+            opos' = if opos == -1 then
                       case op of Label "_start" -> 0
                                  _ -> -1
-                    else opos + osize
-        in ((Com op (B.length bytes) osize (pos') (opos')):prog', labels', pos', opos'))
-        ([], Map.empty, 0, -1) ops
+                    else opos + osize'
+            eatlen' = if eatlen > 0 then eatlen - size else
+                      case op of PrintLen len _ _ -> len
+                                 _ -> 0
+        in
+          trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $ if eatlen' < 0 then error "Eatlen went negative!" else
+          ((Com op (B.length bytes) osize' pos opos):prog', labels', pos', opos', eatlen'))
+        ([], Map.empty, 0, -1, 0) (zip ops prog)
   trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
 
 fixSizes :: Map String Int -> [Command] -> String -> IO [Command]
@@ -211,7 +217,7 @@ toBytes coms op opos = case op of
   PrintLen len final _ -> (if final then "\001" else "\000") `Char8.append`
                           (intToBytes 2 $ len) `Char8.append`
                           (intToBytes 2 $ 65535 - len)
-  Rep from len (Just at) final _ -> Rep.encode from len (posToOpos coms at) final
+  Rep from len (Just at) final _ -> trace ("MAGIC " ++ show from ++ "/" ++ show len ++ " at " ++ show at ++ "o" ++ show (posToOpos coms at)) $ Rep.encode from len (posToOpos coms at) final
   Rep from len Nothing final _ -> trace (show from ++ "/" ++ show len ++ " at " ++ "o" ++ show opos ++ " from \n" ++ showProg coms) $ trace (show ("opos: " ++ show (posToOpos coms from))) $ Rep.encode from len opos final
   Label _ -> B.empty
   _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
@@ -221,16 +227,8 @@ writeGzip filename bytes =
 
 progToBytes :: [Command] -> [B.ByteString]
 progToBytes program =
-  let (prog, pos, opos) = foldl (\ (prog, pos, opos) (Com op size osize _ _) ->
-        let bytes = toBytes program op opos
-            pos' = pos + B.length bytes
-            opos' = if opos == -1 then -- Hack - assume first print is start of executable
-                      case op of Label "_start" -> 0
-                                 _ -> -1
-                    else opos + outputSize op
-        in (bytes:prog, pos', opos'))
-        ([], 0, -1) program
-  in reverse prog
+  map (\ (Com op size osize pos opos) -> toBytes program op opos) program
+
 
 main :: IO ()
 main = do

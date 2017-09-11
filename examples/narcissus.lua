@@ -18,13 +18,13 @@ _"endfirstcopy"
   data { string = "\000\000\000\000" } -- header
   data { string = "\000\003" }         -- header
   data { string = "\024\000" } -- fextra length
-  rep { from = 0, to = l.endfirstcopy, at = l.endprint, isdata = true }
-  rep { from = l.secondcopy, to = l.endsecondcopy, final = true, at = l.secondrep, isdata = true }
+  rep { from = 0, to = l.endfirstcopy, at = l.endprint }
+  rep { from = l.secondcopy, to = l.endsecondcopy, final = true, at = l.secondrep }
 
   data { string = "EVAN" } -- checksum
   data { string = "\106\000\000\000" } -- size
 
-  print { len = l.endprint - l.endfirstcopy, isdata = true }
+  print { len = l.endprint - l.endfirstcopy}
 _"endprint"
 rep { from = 0, to = l.endfirstcopy }
 _"secondrep"
