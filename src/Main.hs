@@ -161,11 +161,11 @@ updateSizes labels prog ops = do
             labels' = case op of Label str -> Map.insert str pos labels
                                  _ -> labels
             pos' = pos + B.length bytes
+            osize = if opos < 0 then 0 else outputSize op
             opos' = if opos == -1 then -- Hack - assume first print is start of executable
                       case op of Label "_start" -> 0
                                  _ -> -1
-                    else opos + outputSize op
-            osize = if opos' <= 0 then 0 else opos' - opos
+                    else opos + osize
         in ((Com op (B.length bytes) osize (pos') (opos')):prog', labels', pos', opos'))
         ([], Map.empty, 0, -1) ops
   trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
