@@ -25,9 +25,9 @@ dslFile = do
   makeAbsolute $ (dirpath exePath) ++ "/../lua/dsl.lua"
 
 data Op =
-    Rep Int Int (Maybe Int) Bool Bool
+    Rep Int Int (Maybe Int) Bool
   | Print String Bool
-  | PrintLen Int Bool Bool
+  | PrintLen Int Bool
   | Data B.ByteString
   | Copy Int Int
   | Label String
@@ -35,9 +35,9 @@ data Op =
 
 instance Show Op where
   show op = case op of
-    Rep from len at final isdata -> "Rep from=" ++ show from ++ " len=" ++ show len ++ " at=" ++ show at ++ " final=" ++ show final
+    Rep from len at final -> "Rep from=" ++ show from ++ " len=" ++ show len ++ " at=" ++ show at ++ " final=" ++ show final
     Print str final -> "Print " ++ show str ++ " final=" ++ show final
-    PrintLen len final isdata -> "Print " ++ show len ++ " final=" ++ show final
+    PrintLen len final -> "Print " ++ show len ++ " final=" ++ show final
     Data bytes -> "Data " ++ show bytes
     Copy from len -> "Copy from=" ++ show from ++ " len=" ++ show len
     Label name -> name ++ ":"
@@ -60,8 +60,7 @@ instance Lua.FromLuaStack Op where
         len <- getField Lua.tointeger "len"
         at <- getFieldOpt (liftM fromInteger . liftM toInteger . Lua.tointeger) "at"
         final <- getFieldBool "final"
-        isdata <- getFieldBool "isdata"
-        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at final isdata
+        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at final
       "print" -> do
         final <- getFieldBool "final"
         str <- getFieldOpt Lua.peek "string"
@@ -69,8 +68,7 @@ instance Lua.FromLuaStack Op where
           Just s -> return $ Print s final
           Nothing -> do
             len <- getField Lua.tointeger "len"
-            isdata <- getFieldBool "isdata"
-            return $ PrintLen (fromInteger $ toInteger len) final isdata
+            return $ PrintLen (fromInteger $ toInteger len) final
       "copy" -> do
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
@@ -138,9 +136,9 @@ readProgram filename labels = do
 initSizes :: [Op] -> [Command]
 initSizes = snd . mapAccumL (\(pos, opos) op -> 
     let (size, osize) = case op of
-          Rep _ len _ _ _ -> (8, len)
+          Rep _ len _ _ -> (8, len)
           Print str _ -> (length str + 5, length str)
-          PrintLen len _ _ -> (5, len)
+          PrintLen len _ -> (5, len)
           Data str -> (B.length str, 0)
           Copy _ len -> (len, 10)
           Label _ -> (0, 0)
@@ -168,7 +166,7 @@ updateSizes labels prog ops = do
                                  _ -> -1
                     else opos + osize'
             eatlen' = if eatlen > 0 then eatlen - size else
-                      case op of PrintLen len _ _ -> len
+                      case op of PrintLen len _ -> len
                                  _ -> 0
         in
           trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $ if eatlen' < 0 then error "Eatlen went negative!" else
@@ -194,8 +192,8 @@ intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..
 
 outputSize :: Op -> Int
 outputSize (Print str _) = length str
-outputSize (PrintLen len _ False) = len
-outputSize (Rep _ len _ _ False) = len
+outputSize (PrintLen len _) = len
+outputSize (Rep _ len _ _) = len
 outputSize _ = 0
 
 posToOpos :: [Command] ->  Int -> Int
@@ -214,11 +212,11 @@ toBytes coms op opos = case op of
                      (intToBytes 2 $ length str) `Char8.append`
                      (intToBytes 2 $ 65535 - length str) `Char8.append`
                      Char8.pack str
-  PrintLen len final _ -> (if final then "\001" else "\000") `Char8.append`
+  PrintLen len final -> (if final then "\001" else "\000") `Char8.append`
                           (intToBytes 2 $ len) `Char8.append`
                           (intToBytes 2 $ 65535 - len)
-  Rep from len (Just at) final _ -> trace ("MAGIC " ++ show from ++ "/" ++ show len ++ " at " ++ show at ++ "o" ++ show (posToOpos coms at)) $ Rep.encode from len (posToOpos coms at) final
-  Rep from len Nothing final _ -> trace (show from ++ "/" ++ show len ++ " at " ++ "o" ++ show opos ++ " from \n" ++ showProg coms) $ trace (show ("opos: " ++ show (posToOpos coms from))) $ Rep.encode from len opos final
+  Rep from len (Just at) final -> trace ("MAGIC " ++ show from ++ "/" ++ show len ++ " at " ++ show at ++ "o" ++ show (posToOpos coms at)) $ Rep.encode from len (posToOpos coms at) final
+  Rep from len Nothing final -> trace (show from ++ "/" ++ show len ++ " at " ++ "o" ++ show opos ++ " from \n" ++ showProg coms) $ trace (show ("opos: " ++ show (posToOpos coms from))) $ Rep.encode from len opos final
   Label _ -> B.empty
   _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
 
