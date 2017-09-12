@@ -30,6 +30,5 @@ rep { from = 0, to = l.endfirstcopy }
 _"secondrep"
 rep { from = l.secondcopy, to = l.endsecondcopy, final = true }
 
-
 data { string = "EVAN" } -- checksum
 data { string = "\106\000\000\000" } -- size

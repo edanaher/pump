@@ -12,7 +12,9 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Debug.Trace (trace)
 
-import Rep
+import Language
+import qualified Rep
+import qualified Simulate
 
 import qualified Foreign.Lua as Lua
 
@@ -23,30 +25,6 @@ dslFile :: IO FilePath
 dslFile = do
   exePath <- getExecutablePath
   makeAbsolute $ (dirpath exePath) ++ "/../lua/dsl.lua"
-
-data Op =
-    Rep Int Int (Maybe Int) Bool
-  | Print String Bool
-  | PrintLen Int Bool
-  | Data B.ByteString
-  | Copy Int Int
-  | Label String
-  deriving  (Eq)
-
-instance Show Op where
-  show op = case op of
-    Rep from len at final -> "Rep from=" ++ show from ++ " len=" ++ show len ++ " at=" ++ show at ++ " final=" ++ show final
-    Print str final -> "Print " ++ show str ++ " final=" ++ show final
-    PrintLen len final -> "Print " ++ show len ++ " final=" ++ show final
-    Data bytes -> "Data " ++ show bytes
-    Copy from len -> "Copy from=" ++ show from ++ " len=" ++ show len
-    Label name -> name ++ ":"
-
-data Command = Com Op Int Int Int Int
-  deriving (Eq)
-
-instance Show Command where
-  show (Com op size osize pos opos) = show pos ++ "=>" ++ show opos ++ "; +" ++ show size ++ "=>" ++ show osize ++ "  " ++ show op
 
 showProg :: [Command] -> String
 showProg coms = unlines $ map show coms
@@ -237,4 +215,5 @@ main = do
   fixedSizes <- fixSizes labels withSizes filename
   bytes <- return $ progToBytes fixedSizes
   putStrLn $ show bytes
+  putStrLn $ unlines $ map show $ Simulate.simulate fixedSizes
   writeGzip "out.gz" bytes
