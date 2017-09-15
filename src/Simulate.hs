@@ -23,7 +23,9 @@ simulate' (Com op size osize pos opos:coms) printLen simpos simopos output =
   let (out, printLen', simpos', simopos') =
         if printLen > 0 then
           --trace ("Eating " ++ show op ++ " at " ++ show pos ++ "/" ++ show opos) $
-          ([Com op size osize simpos simopos], printLen - size, simpos + size, simopos + size)
+          case op of
+            Label _ -> ([], printLen, simpos, simopos)
+            _ -> ([Com op size osize simpos simopos], printLen - size, simpos + size, simopos + size)
         else
           --trace ("simulating " ++ show op ++ " at " ++ show simpos ++ "/" ++ show simopos) $
           case op of
@@ -33,9 +35,26 @@ simulate' (Com op size osize pos opos:coms) printLen simpos simopos output =
             _ -> ([], 0, simpos, simopos)
   in simulate' coms printLen' simpos' simopos' (output ++ out)
 
+addLabels coms sims = case (coms, sims) of
+  ([], sims) -> sims
+  (_, []) -> []
+  (com:coms', sim:sims') ->
+    let (labelledSim, coms'', sims'') = case (com, sim) of
+          (Com _ _ _ pos _, Com _ _ _ spos _) | pos < spos -> ([], coms', sim:sims')
+          (Com _ _ _ pos _, Com _ _ _ spos _) | pos > spos -> ([sim], com:coms', sims')
+          (Com (Label str) _ _ _ _, Com _ _ _ spos sopos) -> ([Com (Label str) 0 0 spos sopos], coms', sim:sims')
+          _ -> ([sim], coms', sims')
+    in
+    labelledSim ++ (addLabels coms'' sims'')
+
+fixUpSimulated :: [Command] -> [Command] -> [Command]
+fixUpSimulated coms sims =
+  addLabels coms sims
 
 simulate :: [Command] -> [Command]
 simulate coms =
   let withoutHeader = dropWhile (\ (Com op _ _ _ _) -> op /= (Label "_start")) coms
       body = takeWhile (\ (Com op _ _ _ _) -> op /= (Label "_finish")) withoutHeader
-  in simulate' body 0 0 0 []
+      rawSim = simulate' body 0 0 0 []
+  in
+  addLabels coms rawSim
