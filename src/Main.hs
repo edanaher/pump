@@ -206,8 +206,8 @@ toBytes coms op opos = case op of
   PrintLen len final -> (if final then "\001" else "\000") `Char8.append`
                           (intToBytes 2 $ len) `Char8.append`
                           (intToBytes 2 $ 65535 - len)
-  Rep from len (Just at) final -> trace ("MAGIC " ++ show from ++ "/" ++ show len ++ " at " ++ show at ++ "o" ++ show (posToOpos coms at)) $ Rep.encode from len (posToOpos coms at) final
-  Rep from len Nothing final -> trace (show from ++ "/" ++ show len ++ " at " ++ "o" ++ show opos ++ " from \n" ++ showProg coms) $ trace (show ("opos: " ++ show (posToOpos coms from))) $ Rep.encode from len opos final
+  Rep from len (Just at) final -> Rep.encode from len (posToOpos coms at) final
+  Rep from len Nothing final -> Rep.encode from len opos final
   Label _ -> B.empty
   _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
 
@@ -226,6 +226,7 @@ main = do
   withSizes <- return $ initSizes program
   labels <- return $ initLabels withSizes
   fixedSizes <- fixSizes labels withSizes filename
+  putStrLn $ unlines $ map show $ fixedSizes
   bytes <- return $ progToBytes fixedSizes
   putStrLn $ show bytes
   putStrLn $ unlines $ map show $ Simulate.simulate fixedSizes
