@@ -37,7 +37,8 @@ packInt n size =
 
 instance Lua.FromLuaStack Op where
   peek idx = do
-    tp <- getField Lua.peek "type" `Lua.catchLuaError` (\ e -> Lua.throwLuaError $ "Error reading type: " ++ show e) :: Lua.Lua String
+    srcInfo <- getLuaSrc
+    tp <- getField Lua.peek "type" `Lua.catchLuaError` (\ e -> Lua.throwLuaError $ "Error reading type at " ++ srcInfo ++ ": " ++ show e) :: Lua.Lua String
     case tp of
       "rep" -> do
         from <- getField Lua.tointeger "from"
@@ -69,7 +70,13 @@ instance Lua.FromLuaStack Op where
       "label" -> do
         str <- getField Lua.peek "name"
         return $ Label str
-    where getField peek f = do
+    where getLuaSrc = do
+            file <- getFieldOpt Lua.peek "_file"
+            line <- getFieldOpt Lua.tointeger "_line"
+            case (file, line) of
+              (Just file, Just line) -> return $ file ++ ":" ++ (show $ toInteger line)
+              _ -> return "[Unknown source]"
+          getField peek f = do
             Lua.pushstring f
             Lua.gettable (idx - 1)
             isnil <- Lua.isnil (-1)
@@ -80,12 +87,10 @@ instance Lua.FromLuaStack Op where
             Lua.pushstring f
             Lua.gettable (idx - 1)
             isnil <- Lua.isnil (-1)
-            trace ("Looking for " ++ show f ++ "; isNil: " ++  show isnil) $
-              if isnil then Lua.remove (-1) >> return Nothing else do
-                v <- peek (-1)
-                trace ("Found v is " ++ show v) $
-                  Lua.remove (-1)
-                return $ Just v
+            if isnil then Lua.remove (-1) >> return Nothing else do
+              v <- peek (-1)
+              Lua.remove (-1)
+              return $ Just v
           getFieldBool f = do
             Lua.pushstring f
             Lua.gettable (idx - 1)
@@ -187,7 +192,6 @@ posToOpos :: [Command] ->  Int -> Int
 posToOpos [] target = error "Ran out of command searching for pos"
 posToOpos _ 0 = 0
 posToOpos (Com op size osize pos opos:coms') target =
-    trace ("Searching for " ++ show target ++ " at " ++ show (Com op size osize pos opos)) $
     if target < pos then error "Converting pos to opos isn't a boundary" else
     if target == pos then opos else
     posToOpos coms' target

@@ -1,4 +1,10 @@
-debug = print
+debug.print = print
+
+function add_src_info(args)
+  local d = debug.getinfo(3, "Sl")
+  args._file = d.short_src
+  args._line = d.currentline
+end
 
 program = { }
 function rep(args)
@@ -6,6 +12,7 @@ function rep(args)
   if args.from and args.to and not args.len then
     args.len = args.to - args.from
   end
+  add_src_info(args)
   table.insert(program, args)
 end
 
@@ -18,6 +25,7 @@ function data(args)
       args.len = args.to - args.from
     end
   end
+  add_src_info(args)
   table.insert(program, args)
 end
 
@@ -30,11 +38,14 @@ function print(args)
       args.len = args.to - args.from
     end
   end
+  add_src_info(args)
   table.insert(program, args)
 end
 
 function _(str)
-  table.insert(program, { type = "label", name = str })
+  args = { type = "label", name = str }
+  add_src_info(args)
+  table.insert(program, args)
 end
 
 l = {}
