@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
-import Data.List (intercalate, mapAccumL)
+import qualified Data.Char as Char
+import Data.List (intercalate, mapAccumL, unfoldr)
 import Control.Monad (liftM)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as Char8
@@ -29,9 +30,14 @@ dslFile = do
 showProg :: [Command] -> String
 showProg coms = unlines $ map show coms
 
+packInt :: Int -> Int -> B.ByteString
+packInt n size =
+  Char8.pack $ map Char.chr $ unfoldr (\ (n, size) ->
+      if size == 0 then Nothing else Just (n `mod` 256, (n `div` 256, size - 1))) (n, size)
+
 instance Lua.FromLuaStack Op where
   peek idx = do
-    tp <- getField Lua.peek "type" :: Lua.Lua String
+    tp <- getField Lua.peek "type" `Lua.catchLuaError` (\ e -> Lua.throwLuaError $ "Error reading type: " ++ show e) :: Lua.Lua String
     case tp of
       "rep" -> do
         from <- getField Lua.tointeger "from"
@@ -52,14 +58,21 @@ instance Lua.FromLuaStack Op where
         len <- getField Lua.tointeger "len"
         return $ Copy (fromInteger $ toInteger from) (fromInteger $ toInteger len)
       "data" -> do
-        str <- getField Lua.tostring "string"
-        return $ Data str
+        str <- getFieldOpt Lua.tostring "string"
+        case str of
+          Just s -> return $ Data s
+          Nothing -> do
+            n <- getField Lua.tointeger "int"
+            size <- getField Lua.tointeger "size"
+            return $ Data $ packInt (fromInteger $ toInteger n) (fromInteger $ toInteger size)
+
       "label" -> do
         str <- getField Lua.peek "name"
         return $ Label str
     where getField peek f = do
             Lua.pushstring f
             Lua.gettable (idx - 1)
+            isnil <- Lua.isnil (-1)
             v <- peek (-1)
             Lua.remove (-1)
             return v
@@ -67,10 +80,12 @@ instance Lua.FromLuaStack Op where
             Lua.pushstring f
             Lua.gettable (idx - 1)
             isnil <- Lua.isnil (-1)
-            if isnil then Lua.remove (-1) >> return Nothing else do
-              v <- peek (-1)
-              Lua.remove (-1)
-              return $ Just v
+            trace ("Looking for " ++ show f ++ "; isNil: " ++  show isnil) $
+              if isnil then Lua.remove (-1) >> return Nothing else do
+                v <- peek (-1)
+                trace ("Found v is " ++ show v) $
+                  Lua.remove (-1)
+                return $ Just v
           getFieldBool f = do
             Lua.pushstring f
             Lua.gettable (idx - 1)
@@ -112,7 +127,7 @@ readProgram filename labels = do
     Lua.getglobal "program" *> Lua.peek (-1)
 
 initSizes :: [Op] -> [Command]
-initSizes = snd . mapAccumL (\(pos, opos) op -> 
+initSizes = snd . mapAccumL (\(pos, opos) op ->
     let (size, osize) = case op of
           Rep _ len _ _ -> (8, len)
           Print str _ -> (length str + 5, length str)

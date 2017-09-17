@@ -10,7 +10,7 @@ function rep(args)
 end
 
 function data(args)
-  if args.string then
+  if args.string or args.int then
     args.type = "data"
   elseif args.from then
     args.type = "copy"
