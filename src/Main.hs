@@ -138,7 +138,7 @@ updateSizes labels prog ops = do
             labels' = case op of Label str -> Map.insert str pos labels
                                  _ -> labels
             pos' = pos + B.length bytes
-            osize' = if opos < 0 || eatlen > 0 then 0 else outputSize op
+            osize' = if opos < 0 || eatlen > 0 then 0 else Simulate.outputSize op
             opos' = if opos == -1 then
                       case op of Label "_start" -> 0
                                  _ -> -1
@@ -167,12 +167,6 @@ data ByteOp =
 
 intToBytes :: Int -> Int -> B.ByteString
 intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..len-1] ]
-
-outputSize :: Op -> Int
-outputSize (Print str _) = length str
-outputSize (PrintLen len _) = len
-outputSize (Rep _ len _ _) = len
-outputSize _ = 0
 
 posToOpos :: [Command] ->  Int -> Int
 posToOpos [] target = error "Ran out of command searching for pos"
