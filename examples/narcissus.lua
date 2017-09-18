@@ -17,11 +17,10 @@ function gzip_footer()
   data { int = l._end, size = 4} -- size
 end
 
-_"fextra_end"
 gzip_header(fextra_size, true)
 _"secondcopy"
-rep { from = 0, to = l.endfirstcopy, at = l.endprint } -- WRONG! This should be at = l.endprint
-rep { from = l.secondcopy, to = l.endsecondcopy, final = true, at = l.secondrep } -- WRONG! This should be after second rep
+rep { from = 0, to = l.endfirstcopy, at = l.endprint }
+rep { from = l.secondcopy, to = l.endsecondcopy, final = true, at = l.secondrep }
 gzip_footer()
 _"endsecondcopy"
 data { string = "narcissus.gz\000" }
