@@ -16,6 +16,7 @@ import Debug.Trace (trace)
 import Language
 import qualified Rep
 import qualified Simulate
+import qualified Zero
 
 import qualified Foreign.Lua as Lua
 
@@ -66,7 +67,9 @@ instance Lua.FromLuaStack Op where
             n <- getField Lua.tointeger "int"
             size <- getField Lua.tointeger "size"
             return $ Data $ packInt (fromInteger $ toInteger n) (fromInteger $ toInteger size)
-
+      "zero" -> do
+        ranges <- getField Lua.peek "ranges" :: Lua.Lua [(Lua.LuaInteger, Lua.LuaInteger)]
+        return $ Zero $ map (\(a, b) -> (fromInteger (toInteger a), fromInteger $ toInteger b)) ranges
       "label" -> do
         str <- getField Lua.peek "name"
         return $ Label str
@@ -139,6 +142,7 @@ initSizes = snd . mapAccumL (\(pos, opos) op ->
           PrintLen len _ -> (5, len)
           Data str -> (B.length str, 0)
           Copy _ len -> (len, 10)
+          Zero _ -> (4, 0)
           Label _ -> (0, 0)
     in ((pos + size, opos + osize), (Com op size osize (pos + size) (opos + osize)))) (0, 0)
 
@@ -181,10 +185,6 @@ fixSizes labels prog filename = do
   then return prog
   else fixSizes labels' prog' filename
 
-data ByteOp =
-    Bytes B.ByteString
-  | Zero Int Int
-
 intToBytes :: Int -> Int -> B.ByteString
 intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..len-1] ]
 
@@ -199,6 +199,7 @@ posToOpos (Com op size osize pos opos:coms') target =
 toBytes :: [Command] -> Op -> Int -> B.ByteString
 toBytes coms op opos = case op of
   Data str -> str
+  Zero ranges -> Char8.pack "ZERO"
   Print str final -> (if final then "\001" else "\000") `Char8.append`
                      (intToBytes 2 $ length str) `Char8.append`
                      (intToBytes 2 $ 65535 - length str) `Char8.append`
@@ -212,12 +213,21 @@ toBytes coms op opos = case op of
   _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
 
 writeGzip filename bytes =
-  B.writeFile filename (foldl B.append B.empty bytes)
+  B.writeFile filename $ foldl B.append B.empty $ map (\ (com, Bytes b) -> b) bytes
 
-progToBytes :: [Command] -> [B.ByteString]
+progToBytes :: [Command] -> [(Command, ByteOp)]
 progToBytes program =
-  map (\ (Com op size osize pos opos) -> toBytes program op opos) program
+  map (\ com@(Com op size osize pos opos) -> case op of
+            Zero ranges -> (com, BZero ranges)
+            _ -> (com, Bytes $ toBytes program op opos)) program
 
+fixZeros :: [(Command, ByteOp)] -> [(Command, ByteOp)]
+fixZeros program =
+  let (BZero ranges) = head $ map snd $ filter (\ (_, b) -> case b of BZero _ -> True; _ -> False) program
+      zero = Zero.encode ranges program
+  in trace ("ZEROS:" ++ show zero) $ map (\ (com, bytes) ->
+      case bytes of Bytes b -> (com, bytes)
+                    BZero _ -> (com, Bytes zero)) program
 
 main :: IO ()
 main = do
@@ -228,6 +238,7 @@ main = do
   fixedSizes <- fixSizes labels withSizes filename
   putStrLn $ unlines $ map show $ fixedSizes
   bytes <- return $ progToBytes fixedSizes
-  putStrLn $ show bytes
+  zeroed <- return $ fixZeros bytes
+  putStrLn $ show zeroed
   putStrLn $ unlines $ map show $ Simulate.simulate fixedSizes
-  writeGzip "out.gz" bytes
+  writeGzip "out.gz" zeroed

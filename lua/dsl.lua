@@ -42,6 +42,12 @@ function print(args)
   table.insert(program, args)
 end
 
+function zero(args)
+  args.type = "zero"
+  add_src_info(args)
+  table.insert(program, args)
+end
+
 function _(str)
   args = { type = "label", name = str }
   add_src_info(args)

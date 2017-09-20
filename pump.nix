@@ -1,11 +1,11 @@
-{ mkDerivation, base, hslua_0_8_0, stdenv }:
+{ mkDerivation, base, hslua_0_8_0, digest, stdenv }:
 mkDerivation {
   pname = "pump";
   version = "0.1.0.0";
   src = ./.;
   isLibrary = false;
   isExecutable = true;
-  executableHaskellDepends = [ base hslua_0_8_0 ];
+  executableHaskellDepends = [ base hslua_0_8_0 digest ];
   description = "Compiler targeting deflate compressed streams (gzip, zip, etc.)";
   license = stdenv.lib.licenses.bsd3;
   postInstall =

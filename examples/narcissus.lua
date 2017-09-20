@@ -1,4 +1,4 @@
-fextra_size = l.endsecondcopy - l.secondcopy
+fextra_size = l.fextra_end - l.secondcopy
 
 function gzip_header(fextra_size, filename)
   local flags = 0
@@ -13,7 +13,7 @@ function gzip_header(fextra_size, filename)
 end
 
 function gzip_footer()
-  data { string = "EVAN" } -- checksum
+  data { string = "\000\000\000\000" } -- checksum
   data { int = l._end, size = 4} -- size
 end
 
@@ -23,6 +23,8 @@ rep { from = 0, to = l.endfirstcopy, at = l.endprint }
 rep { from = l.secondcopy, to = l.endsecondcopy, final = true, at = l.secondrep }
 gzip_footer()
 _"endsecondcopy"
+zero { ranges = {{0, l._end}} }
+_"fextra_end"
 data { string = "narcissus.gz\000" }
 
 _"_start"
@@ -33,6 +35,7 @@ _"endfirstcopy"
   rep { from = l.secondcopy, to = l.endsecondcopy, final = true, at = l.secondrep }
 
   gzip_footer()
+  zero { ranges = {{0, l._end}} }
   data { string = "narcissus.gz\000" }
 
   print { len = l.endprint - l.endfirstcopy}
