@@ -1,7 +1,9 @@
 import Test.HUnit
-import Data.ByteString.Char8 as Char8
+import qualified Data.ByteString.Char8 as Char8
 
-import Rep
+import qualified Rep
+import qualified Pump
+import qualified Language as L
 
 import Control.Exception
 import Control.Monad
@@ -13,6 +15,26 @@ assertError ex action =
     assertFailure $ "Expected error: " ++ show ex
 
 main = runTestTT tests
+
+simplePrograms :: [(String, L.Op)]
+simplePrograms = [
+    ("data { string = \"some data\" }", L.Data (Char8.pack "some data")),
+    ("print { string = \"this is a test\" }", L.Print "this is a test" False),
+    ("print { len = 99 }", L.PrintLen 99 False),
+    ("print { len = 99, final = true }", L.PrintLen 99 True)
+  ]
+
+testReadProgramSimple = TestLabel "Test reading programs" $ TestCase $ do
+  dslSource <- readFile "lua/dsl.lua"
+
+  mapM_ (\ (p, r) -> do
+    p <- Pump.readProgram ("File", p, "dslfile", dslSource) Nothing
+    p @?= [r]) simplePrograms
+
+readTests = TestLabel "Reading program" $ TestList [
+    testReadProgramSimple
+  ]
+
 
 testRepEncode = TestLabel "Test encoding reps" $ TestCase $ do
   Rep.encode 10 10 20 False @?= Char8.pack "B\176\NUL\NUL\NUL\NUL\255\255"
@@ -33,4 +55,4 @@ repTests = TestLabel "Rep" $ TestList [
 --    testRepEncodeTooShort
   ]
 
-tests = TestList [ repTests ]
+tests = TestList [ repTests, readTests ]
