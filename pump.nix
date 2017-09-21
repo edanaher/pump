@@ -1,10 +1,11 @@
-{ mkDerivation, base, hslua_0_8_0, digest, stdenv }:
+{ mkDerivation, base, hslua_0_8_0, digest, HUnit, stdenv }:
 mkDerivation {
   pname = "pump";
   version = "0.1.0.0";
   src = ./.;
   isLibrary = false;
   isExecutable = true;
+  testHaskellDepends = [ HUnit ];
   executableHaskellDepends = [ base hslua_0_8_0 digest ];
   description = "Compiler targeting deflate compressed streams (gzip, zip, etc.)";
   license = stdenv.lib.licenses.bsd3;
@@ -13,4 +14,5 @@ mkDerivation {
       mkdir $out/lua
       cp lua/dsl.lua $out/lua
     '';
+  testTarget = ''--show-details=direct -v'';
 }

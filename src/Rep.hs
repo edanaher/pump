@@ -61,6 +61,7 @@ bits dist len final =
   [ 0, 1, 0 ] ++ bitsForLen len ++ bitsForDist dist ++ [ 0, 0, 0, 0, 0, 0, 0 ] ++ [(if final then 1 else 0), 0, 0]
 
 encode from len at final =
+  if len < 3 then error $ "Error: repeat length of " ++ show len ++ " is too small" else
   let dist = if from < 0 then -from else at - from
       reps = packBits $ bits dist len final in
   reps `B.append` B.pack [0, 0, 255, 255]
