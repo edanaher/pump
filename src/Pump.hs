@@ -115,25 +115,29 @@ loadLuaLabels labels =
       Lua.dostring "setmetatable(l, label_err_mt)"
       return ()
 
-loadStringUnsafe :: String -> String -> Lua.Lua ()
-loadStringUnsafe filename source = do
+loadStringErr :: String -> String -> Lua.Lua (Either String ())
+loadStringErr filename source = do
   status <- Lua.loadstring source
   if status == Lua.OK then do
     status <- Lua.call 0 0
-    return ()
+    return (Right ())
   else do
     err <- Lua.peek (-1)
-    error $ "Error loading source from '" ++ filename ++ "':" ++ err
+    return $ Left $ "Error loading source from '" ++ filename ++ "':" ++ err
 
-readProgram :: LuaSources -> Maybe (Map String Int) -> IO [Op]
+readProgram :: LuaSources -> Maybe (Map String Int) -> IO (Either String [Op])
 readProgram (filename, source, dslFile, dslSource) labels =
   Lua.runLua $ do
     Lua.openlibs
-
-    loadStringUnsafe dslFile dslSource
-    loadLuaLabels labels
-    loadStringUnsafe filename source
-    Lua.getglobal "program" *> Lua.peek (-1)
+    r <- loadStringErr dslFile dslSource
+    case r of
+      Left err -> return $ Left err
+      _a -> do
+        loadLuaLabels labels
+        r <- loadStringErr filename source
+        case r of
+          Left err -> return $ Left err
+          _ -> Lua.getglobal "program" *> Lua.peekEither (-1)
 
 initSizes :: [Op] -> [Command]
 initSizes = snd . mapAccumL (\(pos, opos) op ->
@@ -180,7 +184,9 @@ updateSizes labels prog ops = do
 fixSizes :: Map String Int -> [Command] -> LuaSources -> IO [Command]
 fixSizes labels prog luaSources = do
   _ <- trace ("Fixing sizes on:\n" ++ showProg prog) $ return 0
-  ops' <- readProgram luaSources $ Just labels
+  ops' <- readProgram luaSources (Just labels) >>= \o -> case o of
+            Right r -> return r
+            Left err -> error err
   (prog', labels') <- return $ updateSizes labels prog ops'
   if prog == prog'
   then return prog
@@ -236,7 +242,9 @@ compile = do
   source <- readFile filename
   dslFile <- dslPath
   dslSource <- readFile dslFile
-  program <- readProgram (filename, source, dslFile, dslSource) Nothing
+  program <- readProgram (filename, source, dslFile, dslSource) Nothing >>= \e -> case e of
+    Right r -> return r
+    Left err -> error err
   withSizes <- return $ initSizes program
   labels <- return $ initLabels withSizes
   fixedSizes <- fixSizes labels withSizes (filename, source, dslFile, dslSource)

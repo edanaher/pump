@@ -1,3 +1,4 @@
+import System.Exit (exitFailure, exitSuccess)
 import Test.HUnit
 import qualified Data.ByteString.Char8 as Char8
 
@@ -8,13 +9,9 @@ import qualified Language as L
 import Control.Exception
 import Control.Monad
 
-assertError :: (Exception e, Eq e) => e -> IO a -> IO ()
-assertError ex action =
-  handleJust (guard . (== ex)) (const $ return ()) $ do
-    action
-    assertFailure $ "Expected error: " ++ show ex
-
-main = runTestTT tests
+main = do
+  Counts _ _ errs fails <- runTestTT tests
+  if errs > 0 || fails > 0 then exitFailure else exitSuccess
 
 simplePrograms :: [(String, L.Op)]
 simplePrograms = [
@@ -26,13 +23,26 @@ simplePrograms = [
 
 testReadProgramSimple = TestLabel "Test reading programs" $ TestCase $ do
   dslSource <- readFile "lua/dsl.lua"
-
   mapM_ (\ (p, r) -> do
     p <- Pump.readProgram ("File", p, "dslfile", dslSource) Nothing
-    p @?= [r]) simplePrograms
+    p @?= Right [r]) simplePrograms
+
+errorPrograms :: [(String, String)]
+errorPrograms = [
+    ("parse error nonsense", "Error loading source from 'File':[string \"parse error nonsense\"]:1: syntax error near 'error'"),
+    ("data { }", "Could not read list: Error reading type at [string \"data { }\"]:1: Expected a string but got a nil")
+  ]
+
+testReadProgramError = TestLabel "Testing error handling parsing programs" $ TestCase $ do
+  dslSource <- readFile "lua/dsl.lua"
+  mapM_ (\ (p, err) -> do
+    p <- Pump.readProgram ("File", p, "dslfile", dslSource) Nothing
+    p @?= Left err) errorPrograms
+
 
 readTests = TestLabel "Reading program" $ TestList [
-    testReadProgramSimple
+    testReadProgramSimple,
+    testReadProgramError
   ]
 
 
@@ -45,9 +55,6 @@ testRepEncodeBackwards = TestLabel "Test encoding reps with negative from" $ Tes
   Rep.encode (-10) 10 20 False @?= Rep.encode 10 10 20 False
   Rep.encode (-1) 10 20 False @?= Rep.encode 100 10 101  False
   Rep.encode (-10) 10 20 True @?= Rep.encode 9 10 19 True
-
---testRepEncodeTooShort = TestLabel "Test encoding reps less than 3 long" $ TestCase $ do
---  assertError (ErrorCall "Error: repeat length of 2 is too small") $ return $ Rep.encode (-10) 2 20 False
 
 repTests = TestLabel "Rep" $ TestList [
     testRepEncode,
