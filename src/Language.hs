@@ -24,13 +24,22 @@ instance Show Op where
     Label name -> name ++ ":"
     Padding len -> "[Padding " ++ show len ++ "]"
 
-data Command = Com Op Int Int Int Int
+data Command = Com Op Source Int Int Int Int
   deriving (Eq)
 
 instance Show Command where
-  show (Com op size osize pos opos) = show pos ++ "=>" ++ show opos ++ "; +" ++ show size ++ "=>" ++ show osize ++ "  " ++ show op
+  show (Com op src size osize pos opos) = show pos ++ "=>" ++ show opos ++ "; +" ++ show size ++ "=>" ++ show osize ++ "  " ++ show op ++ " <= " ++ show src
 
 data ByteOp =
     Bytes B.ByteString
   | BZero [(Int, Int)]
+  deriving (Eq, Show)
+
+data Source =
+    SrcNone
+  | SrcLua (String, Int)
+  | SrcCopy Op Int Int
+  deriving (Eq, Show)
+
+newtype SrcedOp = SrcedOp (Op, Source)
   deriving (Eq, Show)

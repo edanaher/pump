@@ -42,11 +42,11 @@ packInt n size =
   Char8.pack $ map Char.chr $ unfoldr (\ (n, size) ->
       if size == 0 then Nothing else Just (n `mod` 256, (n `div` 256, size - 1))) (n, size)
 
-instance Lua.FromLuaStack Op where
+instance Lua.FromLuaStack SrcedOp where
   peek idx = do
     srcInfo <- getLuaSrc
-    tp <- getField Lua.peek "type" `Lua.catchLuaError` (\ e -> Lua.throwLuaError $ "Error reading type at " ++ srcInfo ++ ": " ++ show e) :: Lua.Lua String
-    case tp of
+    tp <- getField Lua.peek "type" `Lua.catchLuaError` (\ e -> Lua.throwLuaError $ "Error reading type at " ++ (printLuaSrc srcInfo) ++ ": " ++ show e) :: Lua.Lua String
+    wrapSrc (SrcLua srcInfo) $ case tp of
       "rep" -> do
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
@@ -83,8 +83,10 @@ instance Lua.FromLuaStack Op where
             file <- getFieldOpt Lua.peek "_file"
             line <- getFieldOpt Lua.tointeger "_line"
             case (file, line) of
-              (Just file, Just line) -> return $ file ++ ":" ++ (show $ toInteger line)
-              _ -> return "[Unknown source]"
+              (Just file, Just line) -> return $ (file, fromIntegral line)
+              _ -> return ("[Unknown source]", -1)
+          printLuaSrc (file, line) = file ++ ":" ++ (show line)
+          wrapSrc src op = op >>= \op' -> return $ SrcedOp (op', src)
           getField peek f = do
             Lua.pushstring f
             Lua.gettable (idx - 1)
@@ -129,7 +131,7 @@ loadStringErr filename source = do
     err <- Lua.peek (-1)
     return $ Left $ "Error loading source from '" ++ filename ++ "':" ++ err
 
-readProgram :: LuaSources -> Maybe (Map String Int) -> IO (Either String [Op])
+readProgram :: LuaSources -> Maybe (Map String Int) -> IO (Either String [SrcedOp])
 readProgram (filename, source, dslFile, dslSource) labels =
   debug ("Reading program with labels " ++ show labels)
   Lua.runLua $ do
@@ -144,8 +146,8 @@ readProgram (filename, source, dslFile, dslSource) labels =
           Left err -> return $ Left err
           _ -> Lua.getglobal "program" *> Lua.peekEither (-1)
 
-initSizes :: [Op] -> [Command]
-initSizes = snd . mapAccumL (\(pos, opos) op ->
+initSizes :: [SrcedOp] -> [Command]
+initSizes = snd . mapAccumL (\(pos, opos) (SrcedOp (op, src)) ->
     let (size, osize) = case op of
           Rep _ len _ _ -> (8, len)
           Print str _ -> (length str + 5, length str)
@@ -154,24 +156,24 @@ initSizes = snd . mapAccumL (\(pos, opos) op ->
           Copy _ len -> (len, 10)
           Zero _ -> (4, 0)
           Label _ -> (0, 0)
-    in ((pos + size, opos + osize), (Com op size osize (pos + size) (opos + osize)))) (0, 0)
+    in ((pos + size, opos + osize), (Com op src size osize (pos + size) (opos + osize)))) (0, 0)
 
 initLabels :: [Command] -> Map String Int
 initLabels =
   Map.fromList .
-  map (\ (Com (Label str) _ _ pos _) -> (str, pos)) .
-  filter (\ (Com op size osize pos opos) -> case op of
+  map (\ (Com (Label str) _ _ _ pos _) -> (str, pos)) .
+  filter (\ (Com op src size osize pos opos) -> case op of
               Label str -> True
               _ -> False)
 
 expandCopy :: [Command] -> Int -> Int -> [Op]
 expandCopy prog from len =
-  let suffix = dropWhile (\(Com _ _ _ pos _) -> pos < from) prog
-      (Com _ _ _ _ startOpos) = head suffix
-      coms = takeWhile (\(Com _ _ _ pos _) -> pos < from + len) suffix
+  let suffix = dropWhile (\(Com _ _ _ _ pos _) -> pos < from) prog
+      (Com _ _ _ _ _ startOpos) = head suffix
+      coms = takeWhile (\(Com _ _ _ _ pos _) -> pos < from + len) suffix
 
   in trace ("Copy: " ++ show from ++ "," ++ show len ++ " => " ++ (unlines $ map show coms))
-     map (\(Com op _ _ _ _) -> op) coms
+     map (\(Com op _ _ _ _ _) -> op) coms
 
 expandCopies :: [Command] -> [Op] -> [Op]
 expandCopies prog ops =
@@ -181,12 +183,12 @@ expandCopies prog ops =
         _ -> [op]
       ) ops
 
-updateSizes :: Map String Int -> [Command] -> [Op] -> ([Command], Map String Int)
+updateSizes :: Map String Int -> [Command] -> [SrcedOp] -> ([Command], Map String Int)
 updateSizes labels prog ops = do
   _ <- trace ("Updating sizes starting from " ++ (unlines $ map show ops)) $ return ()
-  (prog', labels', pos, opos, eatlen) <- return $ foldl (\ (prog', labels, pos, opos, eatlen) (op, com) ->
+  (prog', labels', pos, opos, eatlen) <- return $ foldl (\ (prog', labels, pos, opos, eatlen) (SrcedOp (op, src), com) ->
         let opsize = toSize prog op opos
-            (Com _ size _ _ _) = com
+            (Com _ _ size _ _ _) = com
             labels' = case op of Label str -> Map.insert str pos labels
                                  _ -> labels
             pos' = pos + opsize
@@ -201,7 +203,7 @@ updateSizes labels prog ops = do
         in
           --trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $
           if eatlen' < 0 then trace "Eatlen went negative debug what?" error "Eatlen went negative!" else
-          trace ("Adding op " ++ show op) ((Com op opsize osize' pos opos):prog', labels', pos', opos', eatlen'))
+          trace ("Adding op " ++ show op) ((Com op src opsize osize' pos opos):prog', labels', pos', opos', eatlen'))
         ([], Map.empty, 0, -1, 0) (zip ops prog)
   trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
 
@@ -211,7 +213,7 @@ fixSizes labels prog luaSources = do
   ops' <- readProgram luaSources (Just labels) >>= \o -> case o of
             Right r -> return r
             Left err -> error err
-  opsCopied <- return $ expandCopies prog ops'
+  opsCopied <- return $ ops' --expandCopies prog ops'
   _ <- debug ("Copied:\n" ++ (unlines $ map show opsCopied) ++ "\n") $ return ()
   (prog', labels') <- return $ updateSizes labels prog opsCopied
   if prog == prog'
@@ -224,7 +226,7 @@ intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..
 posToOpos :: [Command] ->  Int -> Int
 posToOpos [] target = error "Ran out of command searching for pos"
 posToOpos _ 0 = 0
-posToOpos (Com op size osize pos opos:coms') target =
+posToOpos (Com op src size osize pos opos:coms') target =
     if target < pos then error "Converting pos to opos isn't a boundary" else
     if target == pos then opos else
     posToOpos coms' target
@@ -257,7 +259,7 @@ writeGzip filename bytes =
 
 progToBytes :: [Command] -> [(Command, ByteOp)]
 progToBytes program =
-  map (\ com@(Com op size osize pos opos) -> case op of
+  map (\ com@(Com op src size osize pos opos) -> case op of
             Zero ranges -> (com, BZero ranges)
             _ -> (com, Bytes $ toBytes program op opos)) program
 

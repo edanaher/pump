@@ -13,6 +13,9 @@ main = do
   Counts _ _ errs fails <- runTestTT tests
   if errs > 0 || fails > 0 then exitFailure else exitSuccess
 
+wrapSrc src =
+ L.SrcLua ("[string \"" ++ src ++ "\"]", 1)
+
 simplePrograms :: [(String, L.Op)]
 simplePrograms = [
     ("data { string = \"some data\" }", L.Data (Char8.pack "some data")),
@@ -24,8 +27,8 @@ simplePrograms = [
 testReadProgramSimple = TestLabel "Test reading programs" $ TestCase $ do
   dslSource <- readFile "lua/dsl.lua"
   mapM_ (\ (p, r) -> do
-    p <- Pump.readProgram ("File", p, "dslfile", dslSource) Nothing
-    p @?= Right [r]) simplePrograms
+    p' <- Pump.readProgram ("File", p, "dslfile", dslSource) Nothing
+    p' @?= Right [L.SrcedOp (r, wrapSrc p)]) simplePrograms
 
 errorPrograms :: [(String, String)]
 errorPrograms = [

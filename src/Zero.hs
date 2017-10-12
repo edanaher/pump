@@ -62,7 +62,7 @@ flipBits n' n  =
 
 encode :: [(Int, Int)] -> [(Command, ByteOp)] -> B.ByteString
 encode ranges program =
-  let com = Com (Label "") 0 0 0 0
+  let --com = Com (Label "") (LuaSrc0 0 0 0
       bytes = map snd program
       baseCrc = (fromIntegral $ crcForZero (Char8.replicate 4 '\000') bytes)
       crcDeltas = [ (crcForZeroAtBit i bytes `xor` baseCrc) | i <- [0..31] ]
