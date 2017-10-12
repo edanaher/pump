@@ -30,15 +30,7 @@ data { string = "narcissus.gz\000" }
 _"_start"
 print { len = l.endprint - l.endfirstcopy }
 _"endfirstcopy"
-  gzip_header(fextra_size, true)
-  rep { from = 0, to = l.endfirstcopy, at = l.endprint }
-  rep { from = l.secondcopy, to = l.endsecondcopy, final = true, at = l.secondrep }
-
-  gzip_footer()
-  zero { ranges = {{0, l._end}} }
-  data { string = "narcissus.gz\000" }
-
-  print { len = l.endprint - l.endfirstcopy}
+  data { from = 0, to = l.endfirstcopy }
 _"endprint"
 rep { from = 0, to = l.endfirstcopy }
 _"secondrep"

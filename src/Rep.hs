@@ -68,4 +68,5 @@ encode from len at final =
 
 -- This really shouldn't compute the whole thing, but it's easy
 size from len at final =
+  if len < 3 then 6 else
   B.length $ encode from len at final

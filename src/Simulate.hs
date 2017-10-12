@@ -52,6 +52,7 @@ outputSize :: Op -> Int
 outputSize (Print str _) = length str
 outputSize (PrintLen len _) = len
 outputSize (Rep _ len _ _) = len
+outputSize (Copy _ _) = error $ "Copy command found in stream after copy elimination..."
 outputSize _ = 0
 
 fixOutPoses :: [Command] -> [Command]

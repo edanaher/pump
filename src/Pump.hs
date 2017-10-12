@@ -20,6 +20,10 @@ import qualified Zero
 
 import qualified Foreign.Lua as Lua
 
+debug s v =
+  trace s v
+-- return ()
+
 type LuaSources = (String, String, String, String)
 
 dirpath :: String -> String
@@ -127,6 +131,7 @@ loadStringErr filename source = do
 
 readProgram :: LuaSources -> Maybe (Map String Int) -> IO (Either String [Op])
 readProgram (filename, source, dslFile, dslSource) labels =
+  debug ("Reading program with labels " ++ show labels)
   Lua.runLua $ do
     Lua.openlibs
     r <- loadStringErr dslFile dslSource
@@ -159,14 +164,32 @@ initLabels =
               Label str -> True
               _ -> False)
 
+expandCopy :: [Command] -> Int -> Int -> [Op]
+expandCopy prog from len =
+  let suffix = dropWhile (\(Com _ _ _ pos _) -> pos < from) prog
+      (Com _ _ _ _ startOpos) = head suffix
+      coms = takeWhile (\(Com _ _ _ pos _) -> pos < from + len) suffix
+
+  in trace ("Copy: " ++ show from ++ "," ++ show len ++ " => " ++ (unlines $ map show coms))
+     map (\(Com op _ _ _ _) -> op) coms
+
+expandCopies :: [Command] -> [Op] -> [Op]
+expandCopies prog ops =
+  debug ("Expanding copies from \n" ++ (unlines $ map show ops) ++ "\n")
+  concatMap (\ op -> case op of
+        Copy from len -> expandCopy prog from len
+        _ -> [op]
+      ) ops
+
 updateSizes :: Map String Int -> [Command] -> [Op] -> ([Command], Map String Int)
 updateSizes labels prog ops = do
+  _ <- trace ("Updating sizes starting from " ++ (unlines $ map show ops)) $ return ()
   (prog', labels', pos, opos, eatlen) <- return $ foldl (\ (prog', labels, pos, opos, eatlen) (op, com) ->
-        let bytes = toBytes prog op opos
+        let opsize = toSize prog op opos
             (Com _ size _ _ _) = com
             labels' = case op of Label str -> Map.insert str pos labels
                                  _ -> labels
-            pos' = pos + B.length bytes
+            pos' = pos + opsize
             osize' = if opos < 0 || eatlen > 0 then 0 else Simulate.outputSize op
             opos' = if opos == -1 then
                       case op of Label "_start" -> 0
@@ -176,8 +199,9 @@ updateSizes labels prog ops = do
                       case op of PrintLen len _ -> len
                                  _ -> 0
         in
-          trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $ if eatlen' < 0 then error "Eatlen went negative!" else
-          ((Com op (B.length bytes) osize' pos opos):prog', labels', pos', opos', eatlen'))
+          --trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $
+          if eatlen' < 0 then trace "Eatlen went negative debug what?" error "Eatlen went negative!" else
+          trace ("Adding op " ++ show op) ((Com op opsize osize' pos opos):prog', labels', pos', opos', eatlen'))
         ([], Map.empty, 0, -1, 0) (zip ops prog)
   trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
 
@@ -187,7 +211,9 @@ fixSizes labels prog luaSources = do
   ops' <- readProgram luaSources (Just labels) >>= \o -> case o of
             Right r -> return r
             Left err -> error err
-  (prog', labels') <- return $ updateSizes labels prog ops'
+  opsCopied <- return $ expandCopies prog ops'
+  _ <- debug ("Copied:\n" ++ (unlines $ map show opsCopied) ++ "\n") $ return ()
+  (prog', labels') <- return $ updateSizes labels prog opsCopied
   if prog == prog'
   then return prog
   else fixSizes labels' prog' luaSources
@@ -217,7 +243,14 @@ toBytes coms op opos = case op of
   Rep from len (Just at) final -> Rep.encode from len (posToOpos coms at) final
   Rep from len Nothing final -> Rep.encode from len opos final
   Label _ -> B.empty
+  Copy from len -> B.empty
   _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
+
+toSize :: [Command] -> Op -> Int -> Int
+toSize coms op opos = case op of
+  Rep from len (Just at) final -> Rep.size from len (posToOpos coms at) final
+  Rep from len Nothing final -> Rep.size from len opos final
+  _ -> B.length $ toBytes coms op opos
 
 writeGzip filename bytes =
   B.writeFile filename $ foldl B.append B.empty $ map (\ (com, Bytes b) -> b) bytes

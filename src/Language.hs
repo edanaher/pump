@@ -10,6 +10,7 @@ data Op =
   | Data B.ByteString
   | Copy Int Int
   | Label String
+  | Padding Int
   deriving  (Eq)
 
 instance Show Op where
@@ -21,6 +22,7 @@ instance Show Op where
     Data bytes -> "Data " ++ show bytes
     Copy from len -> "Copy from=" ++ show from ++ " len=" ++ show len
     Label name -> name ++ ":"
+    Padding len -> "[Padding " ++ show len ++ "]"
 
 data Command = Com Op Int Int Int Int
   deriving (Eq)
