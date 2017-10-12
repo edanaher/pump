@@ -38,7 +38,7 @@ data ByteOp =
 data Source =
     SrcNone
   | SrcLua (String, Int)
-  | SrcCopy Op Int Int
+  | SrcCopy SrcedOp Int Int
   deriving (Eq, Show)
 
 newtype SrcedOp = SrcedOp (Op, Source)

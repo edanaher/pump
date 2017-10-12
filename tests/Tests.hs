@@ -14,7 +14,7 @@ main = do
   if errs > 0 || fails > 0 then exitFailure else exitSuccess
 
 wrapSrc src =
- L.SrcLua ("[string \"" ++ src ++ "\"]", 1)
+ L.SrcLua ("File", 1)
 
 simplePrograms :: [(String, L.Op)]
 simplePrograms = [

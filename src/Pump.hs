@@ -144,7 +144,9 @@ readProgram (filename, source, dslFile, dslSource) labels =
         r <- loadStringErr filename source
         case r of
           Left err -> return $ Left err
-          _ -> Lua.getglobal "program" *> Lua.peekEither (-1)
+          _ -> Lua.getglobal "program" *> Lua.peekEither (-1) >>= \p -> case p of
+            Left err -> return $ Left err
+            Right p -> return $ Right $ map (\ (SrcedOp (op, SrcLua (f, l))) -> SrcedOp (op, SrcLua (filename, l))) p
 
 initSizes :: [SrcedOp] -> [Command]
 initSizes = snd . mapAccumL (\(pos, opos) (SrcedOp (op, src)) ->
@@ -166,22 +168,30 @@ initLabels =
               Label str -> True
               _ -> False)
 
-expandCopy :: [Command] -> Int -> Int -> [Op]
-expandCopy prog from len =
+expandCopy :: [Command] -> SrcedOp -> [SrcedOp]
+expandCopy prog sop@(SrcedOp (Copy from len, _)) =
   let suffix = dropWhile (\(Com _ _ _ _ pos _) -> pos < from) prog
       (Com _ _ _ _ _ startOpos) = head suffix
       coms = takeWhile (\(Com _ _ _ _ pos _) -> pos < from + len) suffix
 
   in trace ("Copy: " ++ show from ++ "," ++ show len ++ " => " ++ (unlines $ map show coms))
-     map (\(Com op _ _ _ _ _) -> op) coms
+     zipWith (\i (Com op src _ _ _ _) -> SrcedOp (op, SrcCopy sop i (length coms))) [0..] coms
 
-expandCopies :: [Command] -> [Op] -> [Op]
+expandCopies :: [Command] -> [SrcedOp] -> [SrcedOp]
 expandCopies prog ops =
   debug ("Expanding copies from \n" ++ (unlines $ map show ops) ++ "\n")
-  concatMap (\ op -> case op of
-        Copy from len -> expandCopy prog from len
-        _ -> [op]
+  concatMap (\ sop@(SrcedOp (op, src)) -> case op of
+        Copy from len -> expandCopy prog sop
+        _ -> [sop]
       ) ops
+
+alignedZip :: [SrcedOp] -> [Command] -> [(SrcedOp, Command)]
+alignedZip [] [] = []
+alignedZip sops [] = map (\sop -> (sop, Com (Padding 0) SrcNone 0 0 0 0)) sops
+alignedZip (sop@(SrcedOp (op, src)):sops) (com@(Com _ src' _ _ _ _):coms) =
+  if src == src' then (sop, com):alignedZip sops coms else (sop, com):alignedZip sops coms
+
+
 
 updateSizes :: Map String Int -> [Command] -> [SrcedOp] -> ([Command], Map String Int)
 updateSizes labels prog ops = do
@@ -204,7 +214,7 @@ updateSizes labels prog ops = do
           --trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $
           if eatlen' < 0 then trace "Eatlen went negative debug what?" error "Eatlen went negative!" else
           trace ("Adding op " ++ show op) ((Com op src opsize osize' pos opos):prog', labels', pos', opos', eatlen'))
-        ([], Map.empty, 0, -1, 0) (zip ops prog)
+        ([], Map.empty, 0, -1, 0) $ trace ((++) "Aligned zip:\n" $ unlines $ map show $ alignedZip ops prog) alignedZip ops prog
   trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
 
 fixSizes :: Map String Int -> [Command] -> LuaSources -> IO [Command]
@@ -213,7 +223,7 @@ fixSizes labels prog luaSources = do
   ops' <- readProgram luaSources (Just labels) >>= \o -> case o of
             Right r -> return r
             Left err -> error err
-  opsCopied <- return $ ops' --expandCopies prog ops'
+  opsCopied <- return $ expandCopies prog ops'
   _ <- debug ("Copied:\n" ++ (unlines $ map show opsCopied) ++ "\n") $ return ()
   (prog', labels') <- return $ updateSizes labels prog opsCopied
   if prog == prog'
@@ -227,7 +237,7 @@ posToOpos :: [Command] ->  Int -> Int
 posToOpos [] target = error "Ran out of command searching for pos"
 posToOpos _ 0 = 0
 posToOpos (Com op src size osize pos opos:coms') target =
-    if target < pos then error "Converting pos to opos isn't a boundary" else
+    if target < pos then opos else --error $ "Converting pos " ++ show target ++ " to opos isn't a boundary" else
     if target == pos then opos else
     posToOpos coms' target
 
@@ -250,7 +260,7 @@ toBytes coms op opos = case op of
 
 toSize :: [Command] -> Op -> Int -> Int
 toSize coms op opos = case op of
-  Rep from len (Just at) final -> Rep.size from len (posToOpos coms at) final
+  Rep from len (Just at) final -> Rep.size from len ((trace ("Doing rep at " ++ show at)) posToOpos coms at) final
   Rep from len Nothing final -> Rep.size from len opos final
   _ -> B.length $ toBytes coms op opos
 
