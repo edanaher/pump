@@ -1,6 +1,7 @@
 import System.Exit (exitFailure, exitSuccess)
 import Test.HUnit
 import qualified Data.ByteString.Char8 as Char8
+import Data.List (intercalate)
 
 import qualified Rep
 import qualified Pump
@@ -62,7 +63,26 @@ testRepEncodeBackwards = TestLabel "Test encoding reps with negative from" $ Tes
 repTests = TestLabel "Rep" $ TestList [
     testRepEncode,
     testRepEncodeBackwards
---    testRepEncodeTooShort
   ]
 
-tests = TestList [ repTests, readTests ]
+
+doubleLabelProgram = intercalate "\n" [
+      "_\"firstlabel\"",
+      "_\"secondlabel\"",
+      "_\"firstlabel\""
+    ]
+
+testDoubleLabel= TestLabel "Test duplicate labels" $ TestCase $ do
+  dslSource <- readFile "lua/dsl.lua"
+  Right program <- Pump.readProgram ("File", doubleLabelProgram, "dslfile", dslSource) Nothing
+  withSizes <- return $ Pump.initSizes program
+  insanity <- return $ Pump.sanityCheck withSizes
+  insanity @?= ["Duplicate label: \"firstlabel\" at:\n    File:1\n    File:3\n"]
+
+sanityTests = TestLabel "Sanity check" $ TestList [
+    testDoubleLabel
+  ]
+
+
+
+tests = TestList [ repTests, readTests, sanityTests ]

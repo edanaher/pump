@@ -173,9 +173,10 @@ expandCopy prog sop@(SrcedOp (Copy from len, _)) =
   let suffix = dropWhile (\(Com _ _ _ _ pos _) -> pos < from) prog
       (Com _ _ _ _ _ startOpos) = head suffix
       coms = takeWhile (\(Com _ _ _ _ pos _) -> pos < from + len) suffix
+      comsWithoutLabels = filter (\(Com op _ _ _ _ _) -> case op of Label _ -> False ; _ -> True) coms
 
-  in trace ("Copy: " ++ show from ++ "," ++ show len ++ " => " ++ (unlines $ map show coms))
-     zipWith (\i (Com op src _ _ _ _) -> SrcedOp (op, SrcCopy sop i (length coms))) [0..] coms
+  in trace ("Copy: " ++ show from ++ "," ++ show len ++ " => " ++ (unlines $ map show comsWithoutLabels))
+     zipWith (\i (Com op src _ _ _ _) -> SrcedOp (op, SrcCopy sop i (length comsWithoutLabels))) [0..] comsWithoutLabels
 
 expandCopies :: [Command] -> [SrcedOp] -> [SrcedOp]
 expandCopies prog ops =
@@ -229,6 +230,20 @@ fixSizes labels prog luaSources = do
   if prog == prog'
   then return prog
   else fixSizes labels' prog' luaSources
+
+
+checkCom :: [Command] -> Command -> [String]
+checkCom coms com@(Com op _ _ _ _ _) = case op of
+  Label str ->
+    let matches = filter (\(Com op' _ _ _ _ _) -> op' == op) coms
+        lines = map (\(Com _ src _ _ _ _) -> case src of SrcLua (f, l) -> f ++ ":" ++ show l) matches
+    in if head matches /= com then ["Duplicate label: " ++ show str ++ " at:\n" ++ unlines (map ("    " ++) lines)] else []
+  _ -> []
+
+sanityCheck :: [Command] -> [String]
+sanityCheck coms =
+  concatMap (checkCom coms) coms
+
 
 intToBytes :: Int -> Int -> B.ByteString
 intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..len-1] ]
@@ -293,9 +308,12 @@ compile = do
   withSizes <- return $ initSizes program
   labels <- return $ initLabels withSizes
   fixedSizes <- fixSizes labels withSizes (filename, source, dslFile, dslSource)
-  putStrLn $ unlines $ map show $ fixedSizes
-  bytes <- return $ progToBytes fixedSizes
-  zeroed <- return $ fixZeros bytes
-  putStrLn $ show zeroed
-  putStrLn $ unlines $ map show $ Simulate.simulate fixedSizes
-  writeGzip "out.gz" zeroed
+  insanity <- return $ sanityCheck fixedSizes
+  if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity)
+    else do
+    putStrLn $ unlines $ map show $ fixedSizes
+    bytes <- return $ progToBytes fixedSizes
+    zeroed <- return $ fixZeros bytes
+    putStrLn $ show zeroed
+    putStrLn $ unlines $ map show $ Simulate.simulate fixedSizes
+    writeGzip "out.gz" zeroed
