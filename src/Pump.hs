@@ -133,7 +133,7 @@ loadStringErr filename source = do
 
 readProgram :: LuaSources -> Maybe (Map String Int) -> IO (Either String [SrcedOp])
 readProgram (filename, source, dslFile, dslSource) labels =
-  debug ("Reading program with labels " ++ show labels)
+  --debug ("Reading program with labels " ++ show labels)
   Lua.runLua $ do
     Lua.openlibs
     r <- loadStringErr dslFile dslSource
@@ -213,7 +213,7 @@ updateSizes labels prog ops = do
                                  _ -> 0
         in
           --trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $
-          if eatlen' < 0 then trace "Eatlen went negative debug what?" error "Eatlen went negative!" else
+          if eatlen' < 0 then error "Eatlen went negative!" else
           trace ("Adding op " ++ show op) ((Com op src opsize osize' pos opos):prog', labels', pos', opos', eatlen'))
         ([], Map.empty, 0, -1, 0) $ trace ((++) "Aligned zip:\n" $ unlines $ map show $ alignedZip ops prog) alignedZip ops prog
   trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
@@ -232,16 +232,46 @@ fixSizes labels prog luaSources = do
   else fixSizes labels' prog' luaSources
 
 
+{- It's a bit more complicated than this; e.g.,
+ -   print "ab"; print "cd"; rep 0 4; rep 4 2
+ - is fine because the second rep only includes part of the first rep, but the
+ - entire print.  Hopefully this won't happen in real programs. -}
+isAligned :: [Command] -> Int -> Bool
+isAligned coms target =
+  target == 0 || any (\(Com _ _ _ _ _ opos) -> opos == target) coms
+
+printSrc (Com _ src _ _ _ _) = case src of
+  SrcLua (f, l) -> f ++ ":" ++ show l
+  _ -> "[Not a SrcLua]"
+
 checkCom :: [Command] -> Command -> [String]
-checkCom coms com@(Com op _ _ _ _ _) = case op of
+checkCom coms com@(Com op _ _ _ _ opos) = case op of
   Label str ->
     let matches = filter (\(Com op' _ _ _ _ _) -> op' == op) coms
-        lines = map (\(Com _ src _ _ _ _) -> case src of SrcLua (f, l) -> f ++ ":" ++ show l) matches
+        lines = map printSrc matches
     in if head matches /= com then ["Duplicate label: " ++ show str ++ " at:\n" ++ unlines (map ("    " ++) lines)] else []
+  Rep from' len at' final ->
+    let at = case at' of Nothing -> opos; Just at -> at
+        from = if from' >= 0 then from' else at + from
+        {-badAt = if isAligned coms from then [] else
+                ["Misaligned rep starting at " ++ show from ++ " on " ++ printSrc com ++ ":\n    " ++ show com]
+        badFrom = if isAligned coms (from + len) then [] else
+                ["Misaligned rep ending at " ++ show (from + len) ++ " on " ++ printSrc com ++ ":\n    " ++ show com] -}
+        badFuture = if from < at then [] else
+                ["Future rep on " ++ printSrc com ++ ":\n    " ++ show com]
+        badShort = if len >= 3 then [] else
+                ["Short rep of " ++ show len ++ " on " ++ printSrc com ++ ":\n    " ++ show com]
+    in
+    {-badAt ++ badFrom ++-} badFuture ++ badShort
   _ -> []
+
+checkStartLabel coms =
+  if any (\(Com op _ _ _ _  _)-> case op of Label "_start" -> True; _ -> False) coms then [] else
+  ["Missing \"_start\" label"]
 
 sanityCheck :: [Command] -> [String]
 sanityCheck coms =
+  checkStartLabel coms ++
   concatMap (checkCom coms) coms
 
 
