@@ -7,10 +7,17 @@ function add_src_info(args)
 end
 
 program = { }
+errors = { }
 function rep(args)
   args.type = "rep"
   if args.from and args.to and not args.len then
     args.len = args.to - args.from
+  end
+  if not args.from or not args.len then
+    err = { err = "Rep command must have from and len or to" }
+    add_src_info(err)
+    table.insert(errors, err)
+    return
   end
   add_src_info(args)
   table.insert(program, args)
@@ -24,6 +31,11 @@ function data(args)
     if args.from and args.to and not args.len then
       args.len = args.to - args.from
     end
+  else
+    err = { err = "Data command must have string, int, or from field" }
+    add_src_info(err)
+    table.insert(errors, err)
+    return
   end
   add_src_info(args)
   table.insert(program, args)
@@ -37,6 +49,11 @@ function print(args)
     if args.from and args.to and not args.len then
       args.len = args.to - args.from
     end
+  else
+    err = { err = "Print command must have string, len, or from field" }
+    add_src_info(err)
+    table.insert(errors, err)
+    return
   end
   add_src_info(args)
   table.insert(program, args)

@@ -1,6 +1,9 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Language where
 
 import Data.ByteString as B
+import qualified Foreign.Lua as Lua
 
 data Op =
     Rep Int Int (Maybe Int) Bool
@@ -43,3 +46,24 @@ data Source =
 
 newtype SrcedOp = SrcedOp (Op, Source)
   deriving (Eq, Show)
+
+newtype DslErr = DslErr (String, String, Int)
+  deriving Eq
+
+instance Show DslErr where
+  show (DslErr (err, file, line)) = file ++ ":" ++ show line ++ " " ++ err
+
+instance Lua.FromLuaStack DslErr where
+  peek idx = do
+    err <- getField Lua.peek "err"
+    file <- getField Lua.peek "_file"
+    line <- getField Lua.tointeger "_line"
+    return $ DslErr (err, file, fromIntegral line)
+    where
+      getField peek f = do
+        Lua.pushstring f
+        Lua.gettable (idx - 1)
+        isnil <- Lua.isnil (-1)
+        v <- peek (-1)
+        Lua.remove (-1)
+        return v

@@ -144,9 +144,12 @@ readProgram (filename, source, dslFile, dslSource) labels =
         r <- loadStringErr filename source
         case r of
           Left err -> return $ Left err
-          _ -> Lua.getglobal "program" *> Lua.peekEither (-1) >>= \p -> case p of
+          _ -> (Lua.getglobal "errors" *> Lua.peekEither (-1) :: Lua.Lua (Either String [DslErr])) >>= \p -> case p of
             Left err -> return $ Left err
-            Right p -> return $ Right $ map (\ (SrcedOp (op, SrcLua (f, l))) -> SrcedOp (op, SrcLua (filename, l))) p
+            Right errs -> if errs /= [] then return $ Left $ "Errors from dsl: \n" ++ unlines (map ((++) "    " . show) errs) else
+              Lua.getglobal "program" *> Lua.peekEither (-1) >>= \p -> case p of
+              Left err -> return $ Left err
+              Right p -> return $ Right $ map (\ (SrcedOp (op, SrcLua (f, l))) -> SrcedOp (op, SrcLua (filename, l))) p
 
 initSizes :: [SrcedOp] -> [Command]
 initSizes = snd . mapAccumL (\(pos, opos) (SrcedOp (op, src)) ->

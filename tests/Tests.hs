@@ -34,7 +34,9 @@ testReadProgramSimple = TestLabel "Test reading programs" $ TestCase $ do
 errorPrograms :: [(String, String)]
 errorPrograms = [
     ("parse error nonsense", "Error loading source from 'File':[string \"parse error nonsense\"]:1: syntax error near 'error'"),
-    ("data { }", "Could not read list: Error reading type at [string \"data { }\"]:1: Expected a string but got a nil")
+    ("data { }", "Errors from dsl: \n    [string \"data { }\"]:1 Data command must have string, int, or from field\n"),
+    ("print { }", "Errors from dsl: \n    [string \"print { }\"]:1 Print command must have string, len, or from field\n"),
+    ("rep { }", "Errors from dsl: \n    [string \"rep { }\"]:1 Rep command must have from and len or to\n")
   ]
 
 testReadProgramError = TestLabel "Testing error handling parsing programs" $ TestCase $ do
