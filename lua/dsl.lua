@@ -44,6 +44,18 @@ end
 function print(args)
   if args.string or args.len then
     args.type = "print"
+    if args.len and (args.len < 0 or args.len > 65535) then
+      err = { err = "Print len must be between 0 and 65535" }
+      add_src_info(err)
+      table.insert(errors, err)
+      return
+    end
+    if args.string and #args.string > 65535 then
+      err = { err = "Print string can't be longer than 65535" }
+      add_src_info(err)
+      table.insert(errors, err)
+      return
+    end
   elseif args.from then
     args.type = "copy"
     if args.from and args.to and not args.len then

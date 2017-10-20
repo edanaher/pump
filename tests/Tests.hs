@@ -36,7 +36,9 @@ errorPrograms = [
     ("parse error nonsense", "Error loading source from 'File':[string \"parse error nonsense\"]:1: syntax error near 'error'"),
     ("data { }", "Errors from dsl: \n    [string \"data { }\"]:1 Data command must have string, int, or from field\n"),
     ("print { }", "Errors from dsl: \n    [string \"print { }\"]:1 Print command must have string, len, or from field\n"),
-    ("rep { }", "Errors from dsl: \n    [string \"rep { }\"]:1 Rep command must have from and len or to\n")
+    ("rep { }", "Errors from dsl: \n    [string \"rep { }\"]:1 Rep command must have from and len or to\n"),
+    ("print { len = -3 }", "Errors from dsl: \n    [string \"print { len = -3 }\"]:1 Print len must be between 0 and 65535\n"),
+    ("print { string = \"" ++ ([1..70000] >> "a") ++ "\" }", "Errors from dsl: \n    [string \"print { string = \"aaaaaaaaaaaaaaaaaaaaaaaaaaa...\"]:1 Print string can't be longer than 65535\n")
   ]
 
 testReadProgramError = TestLabel "Testing error handling parsing programs" $ TestCase $ do
