@@ -1,50 +1,70 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TemplateHaskell #-}
 
 module Language where
 
 import Data.ByteString as B
+import Text.Printf (printf)
+
+import Control.Lens ((^?), makeLenses)
+
 import qualified Foreign.Lua as Lua
 
 data Op =
-    Rep Int Int (Maybe Int) Bool
+    Rep { _from :: Int, _to :: Int, _at :: Maybe Int, _final :: Bool }
   | Zero [(Int, Int)]
   | Print String Bool
-  | PrintLen Int Bool
+  | PrintLen { _len :: Int, _final :: Bool }
   | Data B.ByteString
-  | Copy Int Int
-  | Label String
+  | Copy { _from :: Int, _to :: Int }
+  | Label { _label :: String }
   | Padding Int
   deriving  (Eq)
 
+makeLenses ''Op
+
+showMaybe str (Just x) = str ++ show x
+showMaybe str Nothing = ""
+
 instance Show Op where
   show op = case op of
-    Rep from len at final -> "Rep from=" ++ show from ++ " len=" ++ show len ++ " at=" ++ show at ++ " final=" ++ show final
+    Rep from len at final -> "Rep @" ++ show from ++ "+" ++ show len ++ showMaybe " at " at ++ (if final then " final" else "")
     Zero ranges -> "Zero " ++ show ranges
     Print str final -> "Print " ++ show str ++ " final=" ++ show final
     PrintLen len final -> "Print " ++ show len ++ " final=" ++ show final
     Data bytes -> "Data " ++ show bytes
-    Copy from len -> "Copy from=" ++ show from ++ " len=" ++ show len
+    Copy from len -> "Copy @" ++ show from ++ "+" ++ show len
     Label name -> name ++ ":"
     Padding len -> "[Padding " ++ show len ++ "]"
-
-data Command = Com Op Source Int Int Int Int
-  deriving (Eq)
-
-instance Show Command where
-  show (Com op src size osize pos opos) = show pos ++ "=>" ++ show opos ++ "; +" ++ show size ++ "=>" ++ show osize ++ "  " ++ show op ++ " <= " ++ show src
-
-data ByteOp =
-    Bytes B.ByteString
-  | BZero [(Int, Int)]
-  deriving (Eq, Show)
 
 data Source =
     SrcNone
   | SrcLua (String, Int)
   | SrcCopy SrcedOp Int Int
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show Source where
+  show src = case src of
+    SrcNone -> "_"
+    SrcLua (file, line) -> file ++ ":" ++ show line
+    SrcCopy parent which total -> "[" ++ show which ++ "/" ++ show total ++ "; " ++ show parent ++ "]"
 
 newtype SrcedOp = SrcedOp (Op, Source)
+  deriving (Eq)
+
+instance Show SrcedOp where
+  show (SrcedOp (op, src)) = show src ++ ": " ++ show op
+
+data Command = Com { _op :: Op, _src :: Source, _size :: Int, _osize :: Int, _pos :: Int, _opos :: Int }
+  deriving (Eq)
+
+makeLenses ''Command
+
+instance Show Command where
+  show (Com op src size osize pos opos) = printf "%3d=>%3d +%2d=>%2d %s <= %s" pos opos size osize (show op) (show src)
+
+data ByteOp =
+    Bytes B.ByteString
+  | BZero [(Int, Int)]
   deriving (Eq, Show)
 
 newtype DslErr = DslErr (String, String, Int)

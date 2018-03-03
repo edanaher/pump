@@ -12,6 +12,7 @@ import Data.Bits (shiftR, (.&.))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Debug.Trace (trace)
+import Control.Lens ((^.), (^?), view)
 
 import Language
 import qualified Rep
@@ -166,8 +167,8 @@ initSizes = snd . mapAccumL (\(pos, opos) (SrcedOp (op, src)) ->
 initLabels :: [Command] -> Map String Int
 initLabels =
   Map.fromList .
-  map (\ (Com (Label str) _ _ _ pos _) -> (str, pos)) .
-  filter (\ (Com op src size osize pos opos) -> case op of
+  map (\ com -> (com ^. op . label, com ^. pos)) .
+  filter (\ com -> case com ^. op of
               Label str -> True
               _ -> False)
 
@@ -202,7 +203,6 @@ updateSizes labels prog ops = do
   _ <- trace ("Updating sizes starting from " ++ (unlines $ map show ops)) $ return ()
   (prog', labels', pos, opos, eatlen) <- return $ foldl (\ (prog', labels, pos, opos, eatlen) (SrcedOp (op, src), com) ->
         let opsize = toSize prog op opos
-            (Com _ _ size _ _ _) = com
             labels' = case op of Label str -> Map.insert str pos labels
                                  _ -> labels
             pos' = pos + opsize
@@ -211,7 +211,7 @@ updateSizes labels prog ops = do
                       case op of Label "_start" -> 0
                                  _ -> -1
                     else opos + osize'
-            eatlen' = if eatlen > 0 then eatlen - size else
+            eatlen' = if eatlen > 0 then eatlen - (com ^. size) else
                       case op of PrintLen len _ -> len
                                  _ -> 0
         in
@@ -241,20 +241,18 @@ fixSizes labels prog luaSources = do
  - entire print.  Hopefully this won't happen in real programs. -}
 isAligned :: [Command] -> Int -> Bool
 isAligned coms target =
-  target == 0 || any (\(Com _ _ _ _ _ opos) -> opos == target) coms
+  target == 0 || any ((== target) . view opos) coms
 
-printSrc (Com _ src _ _ _ _) = case src of
-  SrcLua (f, l) -> f ++ ":" ++ show l
-  _ -> "[Not a SrcLua]"
+printSrc = show . view src
 
 checkCom :: [Command] -> Command -> [String]
-checkCom coms com@(Com op _ _ _ _ opos) = case op of
+checkCom coms com = case com ^. op of
   Label str ->
-    let matches = filter (\(Com op' _ _ _ _ _) -> op' == op) coms
+    let matches = filter (((==) $ com ^. op) . view op) coms
         lines = map printSrc matches
     in if head matches /= com then ["Duplicate label: " ++ show str ++ " at:\n" ++ unlines (map ("    " ++) lines)] else []
   Rep from' len at' final ->
-    let at = case at' of Nothing -> opos; Just at -> at
+    let at = case at' of Nothing -> com ^. opos; Just at -> at
         from = if from' >= 0 then from' else at + from
         {-badAt = if isAligned coms from then [] else
                 ["Misaligned rep starting at " ++ show from ++ " on " ++ printSrc com ++ ":\n    " ++ show com]
@@ -347,6 +345,6 @@ compile = do
     putStrLn $ unlines $ map show $ fixedSizes
     bytes <- return $ progToBytes fixedSizes
     zeroed <- return $ fixZeros bytes
-    putStrLn $ show zeroed
-    putStrLn $ unlines $ map show $ Simulate.simulate fixedSizes
+    putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
+    putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show $ Simulate.simulate fixedSizes)
     writeGzip "out.gz" zeroed

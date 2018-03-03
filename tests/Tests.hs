@@ -102,15 +102,15 @@ testMisalignedRep = TestLabel "Test misaligned reps" $ TestCase $ do
                 "rep { from = 0, len = 4 }",
                 "rep { from = 5, len = 4 }"
               ]
-  insanity @?= ["Misaligned rep starting at 5 on File:4:\n    25=>12; +8=>4  Rep from=5 len=4 at=Nothing final=False <= SrcLua (\"File\",4)",
-                "Misaligned rep ending at 9 on File:4:\n    25=>12; +8=>4  Rep from=5 len=4 at=Nothing final=False <= SrcLua (\"File\",4)"]
+  insanity @?= ["Misaligned rep starting at 5 on File:4:\n    25=>12; +8=>4  Rep @5+4 <= File:4",
+                "Misaligned rep ending at 9 on File:4:\n    25=>12; +8=>4  Rep @5+4 <= File:4"]
   insanity <- testSanityCheck $ intercalate "\n" [
                 "_\"_start\"",
                 "print { string = \"1234\" }",
                 "rep { from = 0, len = 4}",
                 "rep { from = 4, len = 3}"
               ]
-  insanity @?= ["Misaligned rep ending at 7 on File:4:\n    25=>11; +8=>3  Rep from=4 len=3 at=Nothing final=False <= SrcLua (\"File\",4)"]
+  insanity @?= ["Misaligned rep ending at 7 on File:4:\n    25=>11; +8=>3  Rep @4+3 <= File:4"]
 
 testShortRep = TestLabel "Test short reps" $ TestCase $ do
   insanity <- testSanityCheck $ intercalate "\n" [
@@ -120,7 +120,7 @@ testShortRep = TestLabel "Test short reps" $ TestCase $ do
                 "rep { from = 0, len = 4 }",
                 "rep { from = 0, len = 2}"
               ]
-  insanity @?= ["Short rep of 2 on File:5:\n    30=>10; +8=>2  Rep from=0 len=2 at=Nothing final=False <= SrcLua (\"File\",5)"]
+  insanity @?= ["Short rep of 2 on File:5:\n     30=> 10 + 8=> 2 Rep @0+2 <= File:5"]
 
 
 sanityTests = TestLabel "Sanity check" $ TestList [

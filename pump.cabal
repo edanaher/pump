@@ -19,7 +19,7 @@ test-suite test-pump
   type: exitcode-stdio-1.0
   main-is: tests/Tests.hs
   hs-source-dirs: ., src
-  build-depends: HUnit, hslua == 0.9.5, base == 4.*, directory, containers, bytestring, digest, lens
+  build-depends: HUnit, hslua, base == 4.*, directory, containers, bytestring, digest, lens
 --test-suite test-pump
 --  type: detailed-0.9
 --  test-module: Tests.Tests
