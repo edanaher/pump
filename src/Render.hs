@@ -1,12 +1,24 @@
 module Render where
 
 import qualified Data.ByteString as B
+import qualified Data.Char as Char
+import qualified Data.ByteString.Char8 as Char8
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Text.Printf (printf)
+
 import Control.Lens ((^.))
 
 import Language
+
+escapeLuaByte b =
+  if Char.isPrint (Char.chr $ fromEnum b)
+  then B.singleton b
+  else
+    let digits = printf "%03d" (fromEnum b)
+        padding = take (3 - length digits) $ repeat '0'
+    in Char8.pack $ "\\" ++ padding ++ digits
 
 data LuaType =
     LRaw String
@@ -18,8 +30,8 @@ data LuaType =
 instance Show LuaType where
   show v = case v of
     LRaw s -> s
-    LStr s -> show s
-    LBytes s -> show s
+    LStr s -> show $ concatMap (\c -> if Char.isPrint c then [c] else printf "%03d" (Char.ord c)) s
+    LBytes s -> "\"" ++ Char8.unpack (B.concatMap escapeLuaByte s) ++ "\""
     LInt n -> show n
     LBool b -> if b then "true" else "false"
 
@@ -47,7 +59,7 @@ renderOp hints op = case op of
   Label l -> "_" ++ show l
   Zero ranges ->
     let lranges = intercalate ", " $ map (\(a, b) -> "{ " ++ show a ++ ", " ++ show b ++ "}") ranges
-        args = renderArgs $ Map.fromList $ [("ranges", LRaw lranges)]
+        args = renderArgs $ Map.fromList $ [("ranges", LRaw $ "{" ++ lranges ++ "}")]
     in "zero " ++ args
   _ -> show op
   
