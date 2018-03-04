@@ -18,6 +18,7 @@ import Language
 import qualified Rep
 import qualified Simulate
 import qualified Zero
+import qualified Render
 
 import qualified Foreign.Lua as Lua
 
@@ -347,4 +348,5 @@ compile = do
     zeroed <- return $ fixZeros bytes
     putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
     putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show $ Simulate.simulate fixedSizes)
+    putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render []) $ Simulate.simulate fixedSizes)
     writeGzip "out.gz" zeroed
