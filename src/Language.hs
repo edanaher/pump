@@ -10,7 +10,7 @@ import Control.Lens ((^?), makeLenses)
 import qualified Foreign.Lua as Lua
 
 data Op =
-    Rep { _from :: Int, _to :: Int, _at :: Maybe Int, _final :: Bool }
+    Rep { _from :: Int, _to :: Int, _at :: Maybe Int, _rsize :: Maybe Int, _final :: Bool }
   | Zero [(Int, Int)]
   | Print String Bool
   | PrintLen { _len :: Int, _final :: Bool }
@@ -27,7 +27,7 @@ showMaybe str Nothing = ""
 
 instance Show Op where
   show op = case op of
-    Rep from len at final -> "Rep @" ++ show from ++ "+" ++ show len ++ showMaybe " at " at ++ (if final then " final" else "")
+    Rep from len at size final -> "Rep @" ++ show from ++ "+" ++ show len ++ showMaybe " at " at ++ showMaybe " size " size ++ (if final then " final" else "")
     Zero ranges -> "Zero " ++ show ranges
     Print str final -> "Print " ++ show str ++ " final=" ++ show final
     PrintLen len final -> "Print " ++ show len ++ " final=" ++ show final

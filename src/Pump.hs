@@ -53,8 +53,9 @@ instance Lua.FromLuaStack SrcedOp where
         from <- getField Lua.tointeger "from"
         len <- getField Lua.tointeger "len"
         at <- getFieldOpt (liftM fromInteger . liftM toInteger . Lua.tointeger) "at"
+        size <- getFieldOpt (liftM fromInteger . liftM toInteger . Lua.tointeger) "size"
         final <- getFieldBool "final"
-        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at final
+        return $ Rep (fromInteger $ toInteger from) (fromInteger $ toInteger len) at size final
       "print" -> do
         final <- getFieldBool "final"
         str <- getFieldOpt Lua.peek "string"
@@ -156,7 +157,8 @@ readProgram (filename, source, dslFile, dslSource) labels =
 initSizes :: [SrcedOp] -> [Command]
 initSizes = snd . mapAccumL (\(pos, opos) (SrcedOp (op, src)) ->
     let (size, osize) = case op of
-          Rep _ len _ _ -> (8, len)
+          Rep _ len _ (Just size) _ -> (size, len)
+          Rep _ len _ Nothing _ -> (8, len)
           Print str _ -> (length str + 5, length str)
           PrintLen len _ -> (5, len)
           Data str -> (B.length str, 0)
@@ -202,7 +204,7 @@ alignedZip (sop@(SrcedOp (op, src)):sops) (com@(Com _ src' _ _ _ _):coms) =
 updateSizes :: Map String Int -> [Command] -> [SrcedOp] -> ([Command], Map String Int)
 updateSizes labels prog ops = do
   _ <- trace ("Updating sizes starting from " ++ (unlines $ map show ops)) $ return ()
-  (prog', labels', pos, opos, eatlen) <- return $ foldl (\ (prog', labels, pos, opos, eatlen) (SrcedOp (op, src), com) ->
+  (prog', labels', pos, opos, eatlen, eatfrom) <- return $ foldl (\ (prog', labels, pos, opos, eatlen, eatfrom) (SrcedOp (op, src), com) ->
         let opsize = toSize prog op opos
             labels' = case op of Label str -> Map.insert str pos labels
                                  _ -> labels
@@ -215,11 +217,14 @@ updateSizes labels prog ops = do
             eatlen' = if eatlen > 0 then eatlen - (com ^. size) else
                       case op of PrintLen len _ -> len
                                  _ -> 0
+            eatfrom' = if eatlen > 0 then eatfrom else
+                       case op of PrintLen len _ -> com
+                                  _ -> eatfrom
         in
           --trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $
-          if eatlen' < 0 then error "Eatlen went negative!" else
-          trace ("Adding op " ++ show op) ((Com op src opsize osize' pos opos):prog', labels', pos', opos', eatlen'))
-        ([], Map.empty, 0, -1, 0) $ trace ((++) "Aligned zip:\n" $ unlines $ map show $ alignedZip ops prog) alignedZip ops prog
+          if eatlen' < 0 then error ("Eatlen went negative!\n" ++ "  Eating from " ++ show eatfrom ++ "\n  had " ++ show eatlen ++ " at " ++ show com) else
+          ((Com op src opsize osize' pos opos):prog', labels', pos', opos', eatlen', eatfrom'))
+        ([], Map.empty, 0, -1, 0, head prog) $ trace ((++) "Aligned zip:\n" $ unlines $ map show $ alignedZip ops prog) alignedZip ops prog
   trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
 
 fixSizes :: Map String Int -> [Command] -> LuaSources -> IO [Command]
@@ -252,19 +257,22 @@ checkCom coms com = case com ^. op of
     let matches = filter (((==) $ com ^. op) . view op) coms
         lines = map printSrc matches
     in if head matches /= com then ["Duplicate label: " ++ show str ++ " at:\n" ++ unlines (map ("    " ++) lines)] else []
-  Rep from' len at' final ->
+  Rep from' len at' rsize final ->
     let at = case at' of Nothing -> com ^. opos; Just at -> at
         from = if from' >= 0 then from' else at + from
         {-badAt = if isAligned coms from then [] else
                 ["Misaligned rep starting at " ++ show from ++ " on " ++ printSrc com ++ ":\n    " ++ show com]
         badFrom = if isAligned coms (from + len) then [] else
                 ["Misaligned rep ending at " ++ show (from + len) ++ " on " ++ printSrc com ++ ":\n    " ++ show com] -}
+        -- this doesn't work...
+        badSize = if rsize == Nothing || rsize == Just (com ^. size) then [] else
+                ["Wrong size on " ++ printSrc com ++ ":\n    " ++ show com]
         badFuture = if from < at then [] else
                 ["Future rep on " ++ printSrc com ++ ":\n    " ++ show com]
         badShort = if len >= 3 then [] else
                 ["Short rep of " ++ show len ++ " on " ++ printSrc com ++ ":\n    " ++ show com]
     in
-    {-badAt ++ badFrom ++-} badFuture ++ badShort
+    {-badAt ++ badFrom ++-} badFuture ++ badShort ++ badSize
   _ -> []
 
 checkStartLabel coms =
@@ -299,16 +307,17 @@ toBytes coms op opos = case op of
   PrintLen len final -> (if final then "\001" else "\000") `Char8.append`
                           (intToBytes 2 $ len) `Char8.append`
                           (intToBytes 2 $ 65535 - len)
-  Rep from len (Just at) final -> Rep.encode from len (posToOpos coms at) final
-  Rep from len Nothing final -> Rep.encode from len opos final
+  Rep from len (Just at) _ final -> Rep.encode from len (posToOpos coms at) final
+  Rep from len Nothing _ final -> Rep.encode from len opos final
   Label _ -> B.empty
   Copy from len -> B.empty
   _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
 
 toSize :: [Command] -> Op -> Int -> Int
 toSize coms op opos = case op of
-  Rep from len (Just at) final -> Rep.size from len ((trace ("Doing rep at " ++ show at)) posToOpos coms at) final
-  Rep from len Nothing final -> Rep.size from len opos final
+  Rep _ _ _ (Just size) _ -> size
+  Rep from len (Just at) Nothing final -> Rep.size from len (posToOpos coms at) final
+  Rep from len Nothing Nothing final -> Rep.size from len opos final
   _ -> B.length $ toBytes coms op opos
 
 writeGzip filename bytes =
@@ -347,6 +356,7 @@ compile = do
     bytes <- return $ progToBytes fixedSizes
     zeroed <- return $ fixZeros bytes
     putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
+    putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render [] . fst) zeroed)
     putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show $ Simulate.simulate fixedSizes)
     putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render []) $ Simulate.simulate fixedSizes)
     writeGzip "out.gz" zeroed

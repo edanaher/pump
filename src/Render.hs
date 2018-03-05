@@ -41,11 +41,12 @@ renderArgs vals =
   in
   "{ " ++ intercalate ", " parts ++ "}"
 
-renderOp :: [String] -> Op -> String
-renderOp hints op = case op of
-  Rep from len at final ->
+renderOp :: [String] -> Op -> Int -> String
+renderOp hints op comsize = case op of
+  Rep from len at size final ->
     let at' = case at of Just at -> [("at", LInt at)]; _ -> []
-        args = renderArgs $ Map.fromList $ [("from", LInt from), ("len", LInt len)] ++ at' ++ [("final", LBool final)]
+        size' = case size of Just rsize -> [("size", LInt rsize)]; _ -> [("size", LInt comsize)]
+        args = renderArgs $ Map.fromList $ [("from", LInt from), ("len", LInt len)] ++ at' ++ size' ++ [("final", LBool final)]
     in "rep " ++ args
   Print str final ->
     let args = renderArgs $ Map.fromList $ [("string", LStr str), ("final", LBool final)]
@@ -65,4 +66,5 @@ renderOp hints op = case op of
   
   
 render :: [Command] -> Command -> String
-render hints com = renderOp [] (com ^. op)
+render hints com = case com of
+  Com op src size osize pos opos -> printf "--[[%3d=>%3d +%2d=>%2d]] %s" pos opos size osize (renderOp [] op size)

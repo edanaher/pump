@@ -32,7 +32,7 @@ simulate' (Com op src size osize pos opos:coms) printLen simpos output =
           case op of
             Print str final -> ([Com (Data $ Char8.pack str) src (length str) 0 simpos 0], 0, simpos + length str)
             PrintLen len final -> ([], len, simpos)
-            Rep from len at final -> simulateRep from len simpos output
+            Rep from len at _ final -> simulateRep from len simpos output
             _ -> ([], 0, simpos)
   in simulate' coms printLen' simpos' (output ++ out)
 
@@ -51,7 +51,7 @@ addLabels coms sims = case (coms, sims) of
 outputSize :: Op -> Int
 outputSize (Print str _) = length str
 outputSize (PrintLen len _) = len
-outputSize (Rep _ len _ _) = len
+outputSize (Rep _ len _ _ _) = len
 outputSize (Copy _ _) = error $ "Copy command found in stream after copy elimination..."
 outputSize _ = 0
 
