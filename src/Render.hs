@@ -5,6 +5,7 @@ import qualified Data.Char as Char
 import qualified Data.ByteString.Char8 as Char8
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromJust)
 import Data.Map.Strict (Map)
 import Text.Printf (printf)
 
@@ -41,11 +42,11 @@ renderArgs vals =
   in
   "{ " ++ intercalate ", " parts ++ "}"
 
-renderOp :: [String] -> Op -> Int -> String
-renderOp hints op comsize = case op of
-  Rep from len at size final ->
+renderCom :: Maybe String -> Command -> String
+renderCom origsrc com = case com ^. op of
+  Rep from len at rsize final ->
     let at' = case at of Just at -> [("at", LInt at)]; _ -> []
-        size' = case size of Just rsize -> [("size", LInt rsize)]; _ -> [("size", LInt comsize)]
+        size' = case rsize of Just rsize -> [("size", LInt rsize)]; _ -> [("size", LInt $ com ^. size)]
         args = renderArgs $ Map.fromList $ [("from", LInt from), ("len", LInt len)] ++ at' ++ size' ++ [("final", LBool final)]
     in "rep " ++ args
   Print str final ->
@@ -55,16 +56,24 @@ renderOp hints op comsize = case op of
     let args = renderArgs $ Map.fromList $ [("len", LInt len), ("final", LBool final)]
     in "print " ++ args
   Data bytes ->
-    let args = renderArgs $ Map.fromList $ [("string", LBytes bytes)]
-    in "data " ++ args
+    case origsrc of
+      Just s -> s
+      Nothing ->
+        let args = renderArgs $ Map.fromList $ [("string", LBytes bytes)]
+        in "data " ++ args
   Label l -> "_" ++ show l
   Zero ranges ->
     let lranges = intercalate ", " $ map (\(a, b) -> "{ " ++ show a ++ ", " ++ show b ++ "}") ranges
         args = renderArgs $ Map.fromList $ [("ranges", LRaw $ "{" ++ lranges ++ "}")]
     in "zero " ++ args
-  _ -> show op
+  _ -> show $ com ^. op
   
   
-render :: [Command] -> Command -> String
-render hints com = case com of
-  Com op src size osize pos opos -> printf "--[[%3d=>%3d +%2d=>%2d]] %s" pos opos size osize (renderOp [] op size)
+render :: [String] -> Command -> String
+render srcs com@(Com op src size osize pos opos) =
+  let origsrc = case src of
+        SrcLua (f, n) -> Just $ srcs !! (n - 1)
+        _ -> Nothing
+  in
+  -- TODO: actually use the origsrc.  It breaks weirdly right now.
+  printf "--[[%3d=>%3d +%2d=>%2d]] %s -- %s" pos opos size osize (renderCom {-origsrc-}Nothing com) (show origsrc)

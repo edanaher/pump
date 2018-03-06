@@ -356,7 +356,7 @@ compile = do
     bytes <- return $ progToBytes fixedSizes
     zeroed <- return $ fixZeros bytes
     putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
-    putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render [] . fst) zeroed)
+    putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
     putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show $ Simulate.simulate fixedSizes)
-    putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render []) $ Simulate.simulate fixedSizes)
+    putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render (lines source)) $ Simulate.simulate fixedSizes)
     writeGzip "out.gz" zeroed
