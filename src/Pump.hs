@@ -158,7 +158,7 @@ initSizes :: [SrcedOp] -> [Command]
 initSizes = snd . mapAccumL (\(pos, opos) (SrcedOp (op, src)) ->
     let (size, osize) = case op of
           Rep _ len _ (Just size) _ -> (size, len)
-          Rep _ len _ Nothing _ -> (8, len)
+          Rep _ len _ Nothing _ -> (1, len)
           Print str _ -> (length str + 5, length str)
           PrintLen len _ -> (5, len)
           Data str -> (B.length str, 0)
@@ -347,14 +347,19 @@ compile = do
     Right r -> return r
     Left err -> error err
   withSizes <- return $ initSizes program
-  labels <- return $ initLabels withSizes
-  fixedSizes <- fixSizes labels withSizes (filename, source, dslFile, dslSource)
+  labels <- trace ("Initial withsizes:\n" ++ unlines (map show withSizes)) return $ initLabels withSizes
+  --fixedSizes <- fixSizes labels withSizes (filename, source, dslFile, dslSource)
+  programWithLabels <- trace ("Initial labels are " ++ (unlines $ Map.elems $ Map.mapWithKey (\k v -> k ++ ": " ++ show v) labels)) readProgram (filename, source, dslFile, dslSource) (Just labels) >>= \o -> case o of
+    Right r -> return r
+    Left err -> error err
+  fixedSizes <- return $ Rep.sizeReps (initSizes programWithLabels)
   insanity <- return $ sanityCheck fixedSizes
   if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity)
     else do
     putStrLn $ unlines $ map show $ fixedSizes
     bytes <- return $ progToBytes fixedSizes
     zeroed <- return $ fixZeros bytes
+    error "Success"
     putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
     putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
     putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show $ Simulate.simulate fixedSizes)
