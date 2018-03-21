@@ -4,18 +4,48 @@ module Language where
 
 import Data.ByteString as B
 import Text.Printf (printf)
+import Data.Map (Map)
+import qualified Data.Map as Map
 
 import Control.Lens ((^?), makeLenses)
 
 import qualified Foreign.Lua as Lua
 
+type LabelMap = Map String Int
+
+data Address =
+    AddrI Int
+  | AddrL String
+  | AddrSum Address Address
+  | AddrDiff Address Address
+  deriving (Eq)
+
+instance Show Address where
+  show addr = case addr of
+    AddrI n -> show n
+    AddrL l -> l
+    AddrSum a b -> "(" ++ show a ++ " + " ++ show b ++ ")"
+    AddrDiff a b -> "(" ++ show a ++ " - " ++ show b ++ ")"
+
+evalAddr :: (Map String Int) -> Address -> Int
+evalAddr labels addr =
+  case addr of
+    AddrI n -> n
+    AddrL l -> labels Map.! l
+    AddrSum a b -> evalAddr labels a + evalAddr labels b
+    AddrDiff a b -> evalAddr labels a - evalAddr labels b
+
+(!!!) = evalAddr
+
+infixr 9 !!!
+
 data Op =
-    Rep { _from :: Int, _to :: Int, _at :: Maybe Int, _rsize :: Maybe Int, _final :: Bool }
-  | Zero [(Int, Int)]
+    Rep { _from :: Address, _to :: Address, _at :: Maybe Address, _rsize :: Maybe Int, _final :: Bool }
+  | Zero [(Address, Address)]
   | Print String Bool
-  | PrintLen { _len :: Int, _final :: Bool }
+  | PrintLen { _len :: Address, _final :: Bool }
   | Data B.ByteString
-  | Copy { _from :: Int, _to :: Int }
+  | Copy { _from :: Address, _to :: Address }
   | Label { _label :: String }
   | Padding Int
   deriving  (Eq)

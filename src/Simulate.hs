@@ -5,6 +5,8 @@ import Language
 import qualified Data.ByteString.Char8 as Char8
 import Data.List (mapAccumL)
 import Debug.Trace (trace)
+import Data.Map (Map)
+import qualified Data.Map as Map
 
 
 simulateRep :: Int -> Int -> Int -> [Command] -> ([Command], Int, Int)
@@ -17,9 +19,9 @@ simulateRep from len pos coms =
   --trace ("--- Produced from " ++ show from ++ "/" ++ show len ++ " => " ++ show pos ++ "," ++ show opos ++ ":\n" ++ (unlines $ map show $ reverse coms') ++ "--------" ) $
   (reverse coms', 0, pos')
 
-simulate' :: [Command] -> Int -> Int -> [Command] -> [Command]
-simulate' [] _ _ output = output
-simulate' (Com op src size osize pos opos:coms) printLen simpos output =
+simulate' :: (Map String Int) -> [Command] -> Int -> Int -> [Command] -> [Command]
+simulate' labels [] _ _ output = output
+simulate' labels (Com op src size osize pos opos:coms) printLen simpos output =
   if printLen < 0 then error "printLen went negative on simulation!" else
   let (out, printLen', simpos') =
         if printLen > 0 then
@@ -31,10 +33,10 @@ simulate' (Com op src size osize pos opos:coms) printLen simpos output =
           --trace ("simulating " ++ show op ++ " at " ++ show simpos ++ "/") $
           case op of
             Print str final -> ([Com (Data $ Char8.pack str) src (length str) 0 simpos 0], 0, simpos + length str)
-            PrintLen len final -> ([], len, simpos)
-            Rep from len at _ final -> simulateRep from len simpos output
+            PrintLen len final -> ([], evalAddr labels len, simpos)
+            Rep from len at _ final -> simulateRep (evalAddr labels from) (evalAddr labels len) simpos output
             _ -> ([], 0, simpos)
-  in simulate' coms printLen' simpos' (output ++ out)
+  in simulate' labels coms printLen' simpos' (output ++ out)
 
 addLabels coms sims = case (coms, sims) of
   ([], sims) -> sims
@@ -48,20 +50,20 @@ addLabels coms sims = case (coms, sims) of
     in
     labelledSim ++ (addLabels coms'' sims'')
 
-outputSize :: Op -> Int
-outputSize (Print str _) = length str
-outputSize (PrintLen len _) = len
-outputSize (Rep _ len _ _ _) = len
-outputSize (Copy _ _) = error $ "Copy command found in stream after copy elimination..."
-outputSize _ = 0
+outputSize :: (Map String Int) -> Op -> Int
+outputSize labels (Print str _) = length str
+outputSize labels (PrintLen len _) = evalAddr labels len
+outputSize labels (Rep _ len _ _ _) = evalAddr labels len
+outputSize labels (Copy _ _) = error $ "Copy command found in stream after copy elimination..."
+outputSize labels _ = 0
 
-fixOutPoses :: [Command] -> [Command]
-fixOutPoses sims = snd $ mapAccumL (\ (opos, eatlen) (Com op src size osize pos _) ->
-  let osize' = if eatlen > 0 || opos == -1 then 0 else outputSize op
+fixOutPoses :: (Map String Int) -> [Command] -> [Command]
+fixOutPoses labels sims = snd $ mapAccumL (\ (opos, eatlen) (Com op src size osize pos _) ->
+  let osize' = if eatlen > 0 || opos == -1 then 0 else outputSize labels op
       eatlen' =
         if eatlen > 0 then eatlen - size else
         if opos == -1 then 0 else
-        case op of PrintLen len _ -> len
+        case op of PrintLen len _ -> evalAddr labels len
                    _ -> 0
       opos' =
         if opos == -1 then case op of
@@ -71,14 +73,14 @@ fixOutPoses sims = snd $ mapAccumL (\ (opos, eatlen) (Com op src size osize pos 
           opos + osize'
   in ((opos', eatlen'), Com op src size osize' pos opos)) (-1, 0) sims
 
-fixUpSimulated :: [Command] -> [Command] -> [Command]
-fixUpSimulated coms sims =
-  fixOutPoses $ addLabels coms sims
+fixUpSimulated :: (Map String Int) -> [Command] -> [Command] -> [Command]
+fixUpSimulated labels coms sims =
+  fixOutPoses labels $ addLabels coms sims
 
-simulate :: [Command] -> [Command]
-simulate coms =
+simulate :: (Map String Int) -> [Command] -> [Command]
+simulate labels coms =
   let withoutHeader = dropWhile (\ (Com op _ _ _ _ _) -> op /= (Label "_start")) coms
       body = takeWhile (\ (Com op _ _ _ _ _) -> op /= (Label "_finish")) withoutHeader
-      rawSim = simulate' body 0 0 []
+      rawSim = simulate' labels body 0 0 []
   in
-  fixUpSimulated coms rawSim
+  fixUpSimulated labels coms rawSim

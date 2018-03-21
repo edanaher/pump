@@ -2,7 +2,8 @@ fextra_size = l.fextra_end - l.secondcopy
 
 function gzip_header(fextra_size, filename)
   local flags = 0
-  if fextra_size > 0 then flags = flags + 4 end
+  --if fextra_size > 0 then flags = flags + 4 end
+  flags = flags + 4
   if filename then flags = flags + 8 end
   data { string = "\031\139\008" } -- header: id1, id2, compression method
   data { int = flags, size = 1 } -- FLGS

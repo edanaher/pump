@@ -44,12 +44,12 @@ end
 function print(args)
   if args.string or args.len then
     args.type = "print"
-    if args.len and (args.len < 0 or args.len > 65535) then
+    --[[if args.len and (args.len < 0 or args.len > 65535) then
       err = { err = "Print len must be between 0 and 65535" }
       add_src_info(err)
       table.insert(errors, err)
       return
-    end
+    end]]
     if args.string and #args.string > 65535 then
       err = { err = "Print string can't be longer than 65535" }
       add_src_info(err)
@@ -83,7 +83,26 @@ function _(str)
   table.insert(program, args)
 end
 
+function mkLabel(val)
+  res = {}
+  if(type(val) == "table") then
+    return val
+  elseif(type(val) == "string") then
+    res = { type = "addr", case = "label", value = val }
+  elseif(type(val) == "number") then
+    res = { type = "addr", case = "constant", value = val }
+  end
+
+  setmetatable(res, label_obj_metatable)
+  return res
+end
+
+label_obj_metatable = {
+  __add = function(self, other) return { type = "addr", case = "plus", [1] = self, [2] = other } end,
+  __sub = function(self, other) return { type = "addr", case = "minus", [1] = self, [2] = other } end,
+}
+
+
 l = {}
-label_mt = { __index = function() return 0 end }
-label_err_mt = { __index = function(self, key) error("Unknown label: " .. key, 2) end }
+label_mt = { __index = function(self, key) debug.print("Calling label metamethod on ") return mkLabel(key) end }
 setmetatable(l, label_mt)

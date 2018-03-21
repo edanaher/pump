@@ -25,6 +25,7 @@ data LuaType =
     LRaw String
   | LStr String
   | LBytes B.ByteString
+  | LAddress Address
   | LInt Int
   | LBool Bool
   deriving (Eq)
@@ -33,6 +34,7 @@ instance Show LuaType where
     LRaw s -> s
     LStr s -> show $ concatMap (\c -> if Char.isPrint c then [c] else printf "%03d" (Char.ord c)) s
     LBytes s -> "\"" ++ Char8.unpack (B.concatMap escapeLuaByte s) ++ "\""
+    LAddress s -> show s
     LInt n -> show n
     LBool b -> if b then "true" else "false"
 
@@ -45,15 +47,15 @@ renderArgs vals =
 renderCom :: Maybe String -> Command -> String
 renderCom origsrc com = case com ^. op of
   Rep from len at rsize final ->
-    let at' = case at of Just at -> [("at", LInt at)]; _ -> []
+    let at' = case at of Just at -> [("at", LAddress at)]; _ -> []
         size' = case rsize of Just rsize -> [("size", LInt rsize)]; _ -> [("size", LInt $ com ^. size)]
-        args = renderArgs $ Map.fromList $ [("from", LInt from), ("len", LInt len)] ++ at' ++ size' ++ [("final", LBool final)]
+        args = renderArgs $ Map.fromList $ [("from", LAddress from), ("len", LAddress len)] ++ at' ++ size' ++ [("final", LBool final)]
     in "rep " ++ args
   Print str final ->
     let args = renderArgs $ Map.fromList $ [("string", LStr str), ("final", LBool final)]
     in "print " ++ args
   PrintLen len final ->
-    let args = renderArgs $ Map.fromList $ [("len", LInt len), ("final", LBool final)]
+    let args = renderArgs $ Map.fromList $ [("len", LAddress len), ("final", LBool final)]
     in "print " ++ args
   Data bytes ->
     case origsrc of
