@@ -35,17 +35,18 @@ evalAddr labels addr =
     AddrSum a b -> evalAddr labels a + evalAddr labels b
     AddrDiff a b -> evalAddr labels a - evalAddr labels b
 
-(!!!) = evalAddr
+(@!) = flip evalAddr
 
-infixr 9 !!!
+infixr 9 @!
 
 data Op =
-    Rep { _from :: Address, _to :: Address, _at :: Maybe Address, _rsize :: Maybe Int, _final :: Bool }
+    Rep { _from :: Address, _len :: Address, _at :: Maybe Address, _rsize :: Maybe Int, _final :: Bool }
   | Zero [(Address, Address)]
   | Print String Bool
   | PrintLen { _len :: Address, _final :: Bool }
   | Data B.ByteString
-  | Copy { _from :: Address, _to :: Address }
+  | DataInt { _value :: Address, _dsize :: Int }
+  | Copy { _from :: Address, _len :: Address }
   | Label { _label :: String }
   | Padding Int
   deriving  (Eq)
@@ -62,6 +63,7 @@ instance Show Op where
     Print str final -> "Print " ++ show str ++ " final=" ++ show final
     PrintLen len final -> "Print " ++ show len ++ " final=" ++ show final
     Data bytes -> "Data " ++ show bytes
+    DataInt addr size -> "Data [" ++ show size ++ "] " ++ show addr
     Copy from len -> "Copy @" ++ show from ++ "+" ++ show len
     Label name -> name ++ ":"
     Padding len -> "[Padding " ++ show len ++ "]"

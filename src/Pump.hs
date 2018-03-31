@@ -12,7 +12,7 @@ import Data.Bits (shiftR, (.&.))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Debug.Trace (trace)
-import Control.Lens ((^.), (^?), view)
+import Control.Lens ((^.), (^?), view, (&), (.~))
 
 import Language
 import qualified Rep
@@ -48,8 +48,29 @@ instance Lua.FromLuaStack Address where
   peek idx = do
     immediate <- Lua.tointegerx (-1)
     case immediate of
-      Just n -> return $ AddrI $ fromIntegral n
-      Nothing -> return $ AddrL "SOMTHING"
+      Just n -> return $ AddrI $ trace ("Found number " ++ show n) fromIntegral n
+      Nothing -> do
+        label <- getField Lua.peek "case" :: Lua.Lua String
+        case label of
+          "label" -> liftM AddrL $ getField Lua.peek "value"
+          "constant" -> liftM (AddrI . fromInteger . toInteger) $ getField Lua.tointeger "value"
+          "plus" -> AddrSum <$> (getFieldInt Lua.peek 1) <*> (getFieldInt Lua.peek 2)
+          "minus" -> AddrDiff <$> (getFieldInt Lua.peek 1) <*> (getFieldInt Lua.peek 2)
+    where
+      getField peek f = do
+        Lua.pushstring f
+        Lua.gettable (idx - 1)
+        isnil <- Lua.isnil (-1)
+        v <- peek (-1)
+        Lua.remove (-1)
+        return v
+      getFieldInt peek n = do
+        Lua.pushinteger $ fromInteger $ toInteger n
+        Lua.gettable (idx - 1)
+        isnil <- Lua.isnil (-1)
+        v <- peek (-1)
+        Lua.remove (-1)
+        return v
 
 instance Lua.FromLuaStack SrcedOp where
   peek idx = do
@@ -57,9 +78,9 @@ instance Lua.FromLuaStack SrcedOp where
     tp <- getField Lua.peek "type" `Lua.catchLuaError` (\ e -> Lua.throwLuaError $ "Error reading type at " ++ (printLuaSrc srcInfo) ++ ": " ++ show e) :: Lua.Lua String
     wrapSrc (SrcLua srcInfo) $ case tp of
       "rep" -> do
-        from <- AddrI . fromInteger . toInteger <$> getField Lua.tointeger "from"
-        len <- AddrI . fromInteger . toInteger <$> getField Lua.tointeger "len"
-        at <- getFieldOpt (liftM (AddrI . fromInteger . toInteger) . Lua.tointeger) "at"
+        from <- getField Lua.peek "from"
+        len <- getField Lua.peek "len"
+        at <- getFieldOpt Lua.peek "at"
         size <- getFieldOpt (liftM fromInteger . liftM toInteger . Lua.tointeger) "size"
         final <- getFieldBool "final"
         return $ Rep from len at size final
@@ -72,20 +93,20 @@ instance Lua.FromLuaStack SrcedOp where
             len <- getField Lua.tointeger "len"
             return $ PrintLen (AddrI $ fromInteger $ toInteger len) final
       "copy" -> do
-        from <- getField Lua.tointeger "from"
-        len <- getField Lua.tointeger "len"
-        return $ Copy (AddrI $ fromInteger $ toInteger from) (AddrI $ fromInteger $ toInteger len)
+        from <- getField Lua.peek "from"
+        len <- getField Lua.peek "len"
+        return $ Copy from len
       "data" -> do
         str <- getFieldOpt Lua.tostring "string"
         case str of
           Just s -> return $ Data s
           Nothing -> do
-            n <- getField Lua.tointeger "int"
+            n <- getField Lua.peek "int"
             size <- getField Lua.tointeger "size"
-            return $ Data $ packInt (fromInteger $ toInteger n) (fromInteger $ toInteger size)
+            return $ DataInt n (fromInteger $ toInteger size)
       "zero" -> do
-        ranges <- getField Lua.peek "ranges" :: Lua.Lua [(Lua.LuaInteger, Lua.LuaInteger)]
-        return $ Zero $ map (\(a, b) -> (AddrI (fromInteger $ toInteger a), AddrI (fromInteger $ toInteger b))) ranges
+        ranges <- getField Lua.peek "ranges" :: Lua.Lua [(Address, Address)]
+        return $ Zero $ ranges
       "label" -> do
         str <- getField Lua.peek "name"
         return $ Label str
@@ -158,12 +179,13 @@ initSizes = snd . mapAccumL (\(pos, opos) (SrcedOp (op, src)) ->
           Print str _ -> (length str + 5, length str)
           PrintLen len _ -> (5, 99)
           Data str -> (B.length str, 0)
+          DataInt str size -> (size, 0)
           Copy _ len -> (99, 10)
           Zero _ -> (4, 0)
           Label _ -> (0, 0)
     in ((pos + size, opos + osize), (Com op src size osize (pos + size) (opos + osize)))) (0, 0)
 
-getLabels :: [Command] -> Map String Int
+getLabels :: [Command] -> LabelMap
 getLabels =
   Map.fromList .
   map (\ com -> (com ^. op . label, com ^. pos)) .
@@ -171,60 +193,85 @@ getLabels =
               Label str -> True
               _ -> False)
 
-expandCopy :: LabelMap -> [Command] -> SrcedOp -> [SrcedOp]
-expandCopy labels prog sop@(SrcedOp (Copy from len, _)) =
-  let suffix = dropWhile (\(Com _ _ _ _ pos _) -> pos < labels !!! from) prog
-      (Com _ _ _ _ _ startOpos) = head suffix
-      coms = takeWhile (\(Com _ _ _ _ pos _) -> pos < evalAddr labels from + evalAddr labels len) suffix
-      comsWithoutLabels = filter (\(Com op _ _ _ _ _) -> case op of Label _ -> False ; _ -> True) coms
+expandCopy :: LabelMap -> [Command] -> Command -> [Command]
+expandCopy labels prog com =
+  let Copy from len = com ^. op
+      suffix = dropWhile (\com -> com ^. pos < from @! labels) prog
+      startOpos = head suffix ^. opos
+      coms = takeWhile (\com -> com ^. pos < from @! labels + len @! labels) suffix
+      comsWithoutLabels = filter (\com -> case com ^. op of Label _ -> False ; _ -> True) coms
 
   in trace ("Copy: " ++ show from ++ "," ++ show len ++ " => " ++ (unlines $ map show comsWithoutLabels))
-     zipWith (\i (Com op src _ _ _ _) -> SrcedOp (op, SrcCopy sop i (length comsWithoutLabels))) [0..] comsWithoutLabels
+     zipWith (\i com' -> com' & src .~ SrcCopy (SrcedOp (com ^. op, com ^. src)) i (length comsWithoutLabels)) [0..] comsWithoutLabels
 
-expandCopies :: LabelMap -> [Command] -> [SrcedOp] -> [SrcedOp]
-expandCopies labels prog ops =
-  debug ("Expanding copies from \n" ++ (unlines $ map show ops) ++ "\n")
-  concatMap (\ sop@(SrcedOp (op, src)) -> case op of
-        Copy from len -> expandCopy labels prog sop
-        _ -> [sop]
-      ) ops
+expandCopies :: LabelMap -> [Command] -> [Command]
+expandCopies labels prog =
+  debug ("Expanding copies from \n" ++ (unlines $ map show prog) ++ "\n")
+  concatMap (\com -> case com ^. op of
+        Copy from len -> expandCopy labels prog com
+        _ -> [com]
+      ) prog
 
 alignedZip :: [SrcedOp] -> [Command] -> [(SrcedOp, Command)]
 alignedZip [] [] = []
 alignedZip sops [] = map (\sop -> (sop, Com (Padding 0) SrcNone 0 0 0 0)) sops
+alignedZip [] _ = []
 alignedZip (sop@(SrcedOp (op, src)):sops) (com@(Com _ src' _ _ _ _):coms) =
   if src == src' then (sop, com):alignedZip sops coms else (sop, com):alignedZip sops coms
 
 
 
-updateSizes :: Map String Int -> [Command] -> [SrcedOp] -> ([Command], Map String Int)
-updateSizes labels prog ops = do
-  _ <- trace ("Updating sizes starting from " ++ (unlines $ map show ops)) $ return ()
-  (prog', labels', pos, opos, eatlen, eatfrom) <- return $ foldl (\ (prog', labels, pos, opos, eatlen, eatfrom) (SrcedOp (op, src), com) ->
-        let opsize = toSize labels prog op opos
-            labels' = case op of Label str -> Map.insert str pos labels
-                                 _ -> labels
+updateSizes :: Map String Int -> [Command] -> ([Command], Map String Int)
+updateSizes labels prog = do
+  _ <- trace ("Updating sizes starting from " ++ (unlines $ map show prog)) $ return ()
+  (prog', labels', pos, opos, eatlen, eatfrom) <- return $ foldl (\ (prog', labels, pos, opos, eatlen, eatfrom) com ->
+        let op' = com ^. op
+            opsize = com ^. size
+            labels' = case op' of Label str -> Map.insert str pos labels
+                                  _ -> labels
             pos' = pos + opsize
-            osize' = if opos < 0 || eatlen > 0 then 0 else Simulate.outputSize labels op
+            osize' = if opos < 0 || eatlen > 0 then 0 else Simulate.outputSize labels op'
             opos' = if opos == -1 then
-                      case op of Label "_start" -> 0
-                                 _ -> -1
+                      case op' of Label "_start" -> 0
+                                  _ -> -1
                     else opos + osize'
             eatlen' = if eatlen > 0 then eatlen - (com ^. size) else
-                      case op of PrintLen len _ -> evalAddr labels len
-                                 _ -> 0
+                      case op' of PrintLen len _ -> evalAddr labels len
+                                  _ -> 0
             eatfrom' = if eatlen > 0 then eatfrom else
-                       case op of PrintLen len _ -> com
-                                  _ -> eatfrom
+                       case op' of PrintLen len _ -> com
+                                   _ -> eatfrom
         in
           --trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $
           if eatlen' < 0 then error ("Eatlen went negative!\n" ++ "  Eating from " ++ show eatfrom ++ "\n  had " ++ show eatlen ++ " at " ++ show com) else
-          ((Com op src opsize osize' pos opos):prog', labels', pos', opos', eatlen', eatfrom'))
-        ([], Map.empty, 0, -1, 0, head prog) $ trace ((++) "Aligned zip:\n" $ unlines $ map show $ alignedZip ops prog) alignedZip ops prog
+          ((Com op' (com ^. src) opsize osize' pos opos):prog', labels', pos', opos', eatlen', eatfrom'))
+        ([], Map.empty, 0, -1, 0, head prog) $ trace ((++) "Formerly Aligned zip:\n" $ unlines $ map show $ prog) prog
   trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
 
-fixSizes :: Map String Int -> [Command] -> LuaSources -> IO [Command]
-fixSizes labels prog luaSources = do
+updateRepSizes :: LabelMap -> [Command] -> [Command]
+updateRepSizes labels prog =
+  let updateRep com = case com ^. op of
+        Rep from len at Nothing final ->
+          let at' = case at of
+                Just addr -> addr @! labels
+                Nothing -> com ^. opos
+          in
+          com & osize .~ (len @! labels) & size .~ Rep.size (from @! labels) (len @! labels) at' final
+        _ -> com
+  in
+  map updateRep prog
+
+fixSizes :: [Command] -> ([Command], LabelMap)
+fixSizes prog =
+  let labels = trace ("Fixing sizes:\n" ++ unlines (map show prog)) $ getLabels prog
+      prog' = updateRepSizes labels prog
+      (prog'', labels') = updateSizes labels prog'
+  in
+  if prog == prog''
+  then (prog'', labels')
+  else fixSizes prog''
+
+{-do
   _ <- trace ("Fixing sizes on:\n" ++ showProg prog) $ return 0
   ops' <- readProgram luaSources (Just labels) >>= \o -> case o of
             Right r -> return r
@@ -234,7 +281,7 @@ fixSizes labels prog luaSources = do
   (prog', labels') <- return $ updateSizes labels prog opsCopied
   if prog == prog'
   then return prog
-  else fixSizes labels' prog' luaSources
+  else fixSizes labels' prog' luaSources-}
 
 
 {- It's a bit more complicated than this; e.g.,
@@ -265,7 +312,7 @@ checkCom labels coms com = case com ^. op of
         --        ["Wrong size on " ++ printSrc com ++ ":\n    " ++ show com]
         badFuture = if from < at then [] else
                 ["Future rep on " ++ printSrc com ++ ":\n    " ++ show com]
-        badShort = if labels !!! len >= 3 then [] else
+        badShort = if len @! labels >= 3 then [] else
                 ["Short rep of " ++ show len ++ " on " ++ printSrc com ++ ":\n    " ++ show com]
     in
     {-badAt ++ badFrom ++-} badFuture ++ badShort-- ++ badSize
@@ -295,6 +342,7 @@ posToOpos (Com op src size osize pos opos:coms') target =
 toBytes :: LabelMap -> [Command] -> Op -> Int -> B.ByteString
 toBytes labels coms op opos = case op of
   Data str -> str
+  DataInt addr size -> intToBytes size (addr @! labels)
   Zero ranges -> Char8.pack "ZERO"
   Print str final -> (if final then "\001" else "\000") `Char8.append`
                      (intToBytes 2 $ length str) `Char8.append`
@@ -343,20 +391,16 @@ compile = do
     Right r -> return r
     Left err -> error err
   withSizes <- return $ initSizes program
-  labels <- trace ("Initial withsizes:\n" ++ unlines (map show withSizes)) return $ getLabels withSizes
-  --fixedSizes <- fixSizes labels withSizes (filename, source, dslFile, dslSource)
-  programWithLabels <- trace ("Initial labels are " ++ (unlines $ Map.elems $ Map.mapWithKey (\k v -> k ++ ": " ++ show v) labels)) readProgram (filename, source, dslFile, dslSource) (Just labels) >>= \o -> case o of
-    Right r -> return r
-    Left err -> error err
-  fixedSizes <- return $ Rep.sizeReps (initSizes programWithLabels)
-  labels <- return $ getLabels fixedSizes
+  -- TODO: Sanity check labels existing/duplicates/etc.
+  initLabels <- return $ getLabels withSizes
+  withCopies <- return $ expandCopies initLabels withSizes
+  (fixedSizes, labels) <- return $ fixSizes withCopies
   insanity <- return $ sanityCheck labels fixedSizes
   if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity)
     else do
     putStrLn $ unlines $ map show $ fixedSizes
     bytes <- return $ progToBytes labels fixedSizes
     zeroed <- return $ fixZeros bytes
-    error "Success"
     putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
     putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
     putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show $ Simulate.simulate labels fixedSizes)

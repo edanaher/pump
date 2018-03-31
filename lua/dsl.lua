@@ -104,5 +104,5 @@ label_obj_metatable = {
 
 
 l = {}
-label_mt = { __index = function(self, key) debug.print("Calling label metamethod on ") return mkLabel(key) end }
+label_mt = { __index = function(self, key) return mkLabel(key) end }
 setmetatable(l, label_mt)

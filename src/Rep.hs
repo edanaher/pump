@@ -73,20 +73,3 @@ encode from len at final =
 size from len at final =
   if len < 3 then 6 else
   B.length $ encode from len at final
-
-
-
-update :: Command -> Command -> Command -> Command
-update rep old new =
-  let depends rep on =
-        rep ^? from == on ^? from
-  in
-    rep
-
-sizeReps :: [Command] -> [Command]
-sizeReps coms =
-  let reps = trace ("Sizing reps from: " ++ unlines (map show coms)) filter (\com -> case com ^. op of Rep _ _ _ _ _ -> True; _ -> False) coms
-  in
-  trace ("Reps:\n" ++ (unlines $ map (("  " ++) . show) reps) ++ "----")
-  
-  coms
