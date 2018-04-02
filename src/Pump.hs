@@ -183,7 +183,7 @@ initSizes = snd . mapAccumL (\(pos, opos) (SrcedOp (op, src)) ->
           Copy _ len -> (99, 10)
           Zero _ -> (4, 0)
           Label _ -> (0, 0)
-    in ((pos + size, opos + osize), (Com op src size osize (pos + size) (opos + osize)))) (0, 0)
+    in ((pos + size, opos + osize), (Com op src size osize pos opos))) (0, 0)
 
 getLabels :: [Command] -> LabelMap
 getLabels =
@@ -201,7 +201,7 @@ expandCopy labels prog com =
       coms = takeWhile (\com -> com ^. pos < from @! labels + len @! labels) suffix
       comsWithoutLabels = filter (\com -> case com ^. op of Label _ -> False ; _ -> True) coms
 
-  in trace ("Copy: " ++ show from ++ "," ++ show len ++ " => " ++ (unlines $ map show comsWithoutLabels))
+  in trace ("Copy: " ++ show from ++ " (" ++ show (from @! labels) ++ ")," ++ show len ++ " (" ++ show (len @! labels) ++ ") => " ++ (unlines $ map show comsWithoutLabels))
      zipWith (\i com' -> com' & src .~ SrcCopy (SrcedOp (com ^. op, com ^. src)) i (length comsWithoutLabels)) [0..] comsWithoutLabels
 
 expandCopies :: LabelMap -> [Command] -> [Command]
