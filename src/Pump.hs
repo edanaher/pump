@@ -7,7 +7,7 @@ import Control.Monad (liftM)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as Char8
 import System.Directory (makeAbsolute)
-import System.Environment (getArgs, getExecutablePath)
+import System.Environment (getExecutablePath)
 import Data.Bits (shiftR, (.&.))
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -378,9 +378,8 @@ fixZeros program =
       case bytes of Bytes b -> (com, bytes)
                     BZero _ -> (com, Bytes zero)) program
 
-compile :: IO ()
-compile = do
-  [ filename ] <- getArgs
+compile :: String -> IO ()
+compile filename = do
   source <- readFile filename
   dslFile <- dslPath
   dslSource <- readFile dslFile
