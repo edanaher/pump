@@ -48,7 +48,7 @@ instance Lua.FromLuaStack Address where
   peek idx = do
     immediate <- Lua.tointegerx (-1)
     case immediate of
-      Just n -> return $ AddrI $ trace ("Found number " ++ show n) fromIntegral n
+      Just n -> return $ AddrI $ fromIntegral n
       Nothing -> do
         label <- getField Lua.peek "case" :: Lua.Lua String
         case label of

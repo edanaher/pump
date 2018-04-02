@@ -2,6 +2,8 @@ import System.Exit (exitFailure, exitSuccess)
 import Test.HUnit
 import qualified Data.ByteString.Char8 as Char8
 import Data.List (intercalate)
+import Data.Map (Map)
+import qualified Data.Map as Map
 
 import qualified Rep
 import qualified Pump
@@ -21,8 +23,8 @@ simplePrograms :: [(String, L.Op)]
 simplePrograms = [
     ("data { string = \"some data\" }", L.Data (Char8.pack "some data")),
     ("print { string = \"this is a test\" }", L.Print "this is a test" False),
-    ("print { len = 99 }", L.PrintLen 99 False),
-    ("print { len = 99, final = true }", L.PrintLen 99 True)
+    ("print { len = 99 }", L.PrintLen (L.AddrI 99) False),
+    ("print { len = 99, final = true }", L.PrintLen (L.AddrI 99) True)
   ]
 
 testReadProgramSimple = TestLabel "Test reading programs" $ TestCase $ do
@@ -37,7 +39,8 @@ errorPrograms = [
     ("data { }", "Errors from dsl: \n    [string \"data { }\"]:1 Data command must have string, int, or from field\n"),
     ("print { }", "Errors from dsl: \n    [string \"print { }\"]:1 Print command must have string, len, or from field\n"),
     ("rep { }", "Errors from dsl: \n    [string \"rep { }\"]:1 Rep command must have from and len or to\n"),
-    ("print { len = -3 }", "Errors from dsl: \n    [string \"print { len = -3 }\"]:1 Print len must be between 0 and 65535\n"),
+    -- This should be a sanity check
+    --("print { len = -3 }", "Errors from dsl: \n    [string \"print { len = -3 }\"]:1 Print len must be between 0 and 65535\n"),
     ("print { string = \"" ++ ([1..70000] >> "a") ++ "\" }", "Errors from dsl: \n    [string \"print { string = \"aaaaaaaaaaaaaaaaaaaaaaaaaaa...\"]:1 Print string can't be longer than 65535\n")
   ]
 
@@ -77,7 +80,7 @@ testSanityCheck program = do
     Left err -> (err @?= "[No error]") >> return []
     Right program -> do
       withSizes <- return $ Pump.initSizes program
-      return $ Pump.sanityCheck withSizes
+      return $ Pump.sanityCheck Map.empty withSizes
 
 testMissingStartLabel= TestLabel "Test missing _start label" $ TestCase $ do
   insanity <- testSanityCheck $ intercalate "\n" [
@@ -120,7 +123,7 @@ testShortRep = TestLabel "Test short reps" $ TestCase $ do
                 "rep { from = 0, len = 4 }",
                 "rep { from = 0, len = 2}"
               ]
-  insanity @?= ["Short rep of 2 on File:5:\n     30=> 10 + 8=> 2 Rep @0+2 <= File:5"]
+  insanity @?= ["Short rep of 2 on File:5:\n     15=>103 + 1=>99 Rep @0+2 <= File:5"]
 
 
 sanityTests = TestLabel "Sanity check" $ TestList [
