@@ -2,7 +2,7 @@
 module Pump where
 
 import qualified Data.Char as Char
-import Data.List (intercalate, mapAccumL, unfoldr)
+import Data.List (intercalate, mapAccumL, unfoldr, sortBy)
 import Control.Monad (liftM)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as Char8
@@ -90,8 +90,8 @@ instance Lua.FromLuaStack SrcedOp where
         case str of
           Just s -> return $ Print s final
           Nothing -> do
-            len <- getField Lua.tointeger "len"
-            return $ PrintLen (AddrI $ fromInteger $ toInteger len) final
+            len <- getField Lua.peek "len"
+            return $ PrintLen len final
       "copy" -> do
         from <- getField Lua.peek "from"
         len <- getField Lua.peek "len"
@@ -221,14 +221,12 @@ alignedZip (sop@(SrcedOp (op, src)):sops) (com@(Com _ src' _ _ _ _):coms) =
 
 
 
-updateSizes :: Map String Int -> [Command] -> ([Command], Map String Int)
+updateSizes :: Map String Int -> [Command] -> [Command]
 updateSizes labels prog = do
   _ <- trace ("Updating sizes starting from " ++ (unlines $ map show prog)) $ return ()
-  (prog', labels', pos, opos, eatlen, eatfrom) <- return $ foldl (\ (prog', labels, pos, opos, eatlen, eatfrom) com ->
+  (prog', pos, opos, eatlen, eatfrom) <- return $ foldl (\ (prog', pos, opos, eatlen, eatfrom) com ->
         let op' = com ^. op
-            opsize = com ^. size
-            labels' = case op' of Label str -> Map.insert str pos labels
-                                  _ -> labels
+            opsize = toSize labels prog op' opos
             pos' = pos + opsize
             osize' = if opos < 0 || eatlen > 0 then 0 else Simulate.outputSize labels op'
             opos' = if opos == -1 then
@@ -236,7 +234,7 @@ updateSizes labels prog = do
                                   _ -> -1
                     else opos + osize'
             eatlen' = if eatlen > 0 then eatlen - (com ^. size) else
-                      case op' of PrintLen len _ -> evalAddr labels len
+                      case op' of PrintLen len _ -> len @! labels
                                   _ -> 0
             eatfrom' = if eatlen > 0 then eatfrom else
                        case op' of PrintLen len _ -> com
@@ -244,9 +242,9 @@ updateSizes labels prog = do
         in
           --trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $
           if eatlen' < 0 then error ("Eatlen went negative!\n" ++ "  Eating from " ++ show eatfrom ++ "\n  had " ++ show eatlen ++ " at " ++ show com) else
-          ((Com op' (com ^. src) opsize osize' pos opos):prog', labels', pos', opos', eatlen', eatfrom'))
-        ([], Map.empty, 0, -1, 0, head prog) $ trace ((++) "Formerly Aligned zip:\n" $ unlines $ map show $ prog) prog
-  trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ (reverse prog', labels')
+          ((Com op' (com ^. src) opsize osize' pos opos):prog', pos', opos', eatlen', eatfrom'))
+        ([], 0, -1, 0, head prog) $ trace ((++) "Formerly Aligned zip:\n" $ unlines $ map show $ prog) prog
+  trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ reverse prog'
 
 updateRepSizes :: LabelMap -> [Command] -> [Command]
 updateRepSizes labels prog =
@@ -261,15 +259,14 @@ updateRepSizes labels prog =
   in
   map updateRep prog
 
-fixSizes :: [Command] -> ([Command], LabelMap)
+fixSizes :: [Command] -> [Command]
 fixSizes prog =
   let labels = trace ("Fixing sizes:\n" ++ unlines (map show prog)) $ getLabels prog
-      prog' = updateRepSizes labels prog
-      (prog'', labels') = updateSizes labels prog'
+      prog' = updateSizes labels prog
   in
-  if prog == prog''
-  then (prog'', labels')
-  else fixSizes prog''
+  if prog == prog'
+  then prog
+  else fixSizes prog'
 
 {-do
   _ <- trace ("Fixing sizes on:\n" ++ showProg prog) $ return 0
@@ -394,13 +391,15 @@ compile = do
   -- TODO: Sanity check labels existing/duplicates/etc.
   initLabels <- return $ getLabels withSizes
   withCopies <- return $ expandCopies initLabels withSizes
-  (fixedSizes, labels) <- return $ fixSizes withCopies
+  fixedSizes <- return $ fixSizes withCopies
+  labels <- return $ getLabels fixedSizes
   insanity <- return $ sanityCheck labels fixedSizes
   if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity)
     else do
     putStrLn $ unlines $ map show $ fixedSizes
     bytes <- return $ progToBytes labels fixedSizes
     zeroed <- return $ fixZeros bytes
+    putStrLn $ "\n===== Final labels: ======\n" ++ (unlines $ map (\(l, n) -> l ++ ": " ++ show n) $ sortBy (\a b -> snd a `compare` snd b) $ Map.assocs labels)
     putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
     putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
     putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show $ Simulate.simulate labels fixedSizes)
