@@ -359,8 +359,8 @@ fixZeros program =
       case bytes of Bytes b -> (com, bytes)
                     BZero _ -> (com, Bytes zero)) program
 
-compile :: String -> IO ()
-compile filename = do
+compile :: String -> Maybe String -> IO ()
+compile filename simfile = do
   source <- readFile filename
   dslFile <- dslPath
   dslSource <- readFile dslFile
@@ -382,6 +382,10 @@ compile filename = do
     putStrLn $ "\n===== Final labels: ======\n" ++ (unlines $ map (\(l, n) -> l ++ ": " ++ show n) $ sortBy (\a b -> snd a `compare` snd b) $ Map.assocs labels)
     putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
     putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
-    putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show $ Simulate.simulate labels fixedSizes)
-    putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render (lines source)) $ Simulate.simulate labels fixedSizes)
+    simulated <- return $ Simulate.simulate labels fixedSizes
+    putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show simulated )
+    putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render (lines source)) simulated)
     writeGzip "out.gz" zeroed
+    case simfile of
+      Just simfile -> trace "Writing to simfile" writeFile simfile (unlines $ map (Render.render (lines source)) simulated)
+      Nothing -> trace "simfile is empty" return ()

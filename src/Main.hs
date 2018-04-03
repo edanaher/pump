@@ -11,10 +11,10 @@ params = [docopt|
 pump - a "compiler" for gzip and other deflate-based "languages"
 
 Usage:
-  pump [--simulate] <file>
+  pump [--simulate=<simfile>] <file>
 
 Options:
-  --simulate -s    Do simulation
+  --simulate=<simfile>, -s    Save simulated output to <simfile>
 |]
 
 getArgOrExit = getArgOrExitWith params
@@ -23,4 +23,5 @@ main :: IO ()
 main = do
   args <- parseArgsOrExit params =<< getArgs
   filename <- args `getArgOrExit` (argument "file")
-  Pump.compile filename
+  simfile <- return $ args `getArg` (longOption "simulate")
+  Pump.compile filename simfile
