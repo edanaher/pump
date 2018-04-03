@@ -212,14 +212,6 @@ expandCopies labels prog =
         _ -> [com]
       ) prog
 
-alignedZip :: [SrcedOp] -> [Command] -> [(SrcedOp, Command)]
-alignedZip [] [] = []
-alignedZip sops [] = map (\sop -> (sop, Com (Padding 0) SrcNone 0 0 0 0)) sops
-alignedZip [] _ = []
-alignedZip (sop@(SrcedOp (op, src)):sops) (com@(Com _ src' _ _ _ _):coms) =
-  if src == src' then (sop, com):alignedZip sops coms else (sop, com):alignedZip sops coms
-
-
 
 updateSizes :: Map String Int -> [Command] -> [Command]
 updateSizes labels prog = do
@@ -268,17 +260,6 @@ fixSizes prog =
   then prog
   else fixSizes prog'
 
-{-do
-  _ <- trace ("Fixing sizes on:\n" ++ showProg prog) $ return 0
-  ops' <- readProgram luaSources (Just labels) >>= \o -> case o of
-            Right r -> return r
-            Left err -> error err
-  opsCopied <- return $ expandCopies labels prog ops'
-  _ <- debug ("Copied:\n" ++ (unlines $ map show opsCopied) ++ "\n") $ return ()
-  (prog', labels') <- return $ updateSizes labels prog opsCopied
-  if prog == prog'
-  then return prog
-  else fixSizes labels' prog' luaSources-}
 
 
 {- It's a bit more complicated than this; e.g.,
@@ -301,18 +282,18 @@ checkCom labels coms com = case com ^. op of
     let at = case at' of Nothing -> com ^. opos; Just at -> evalAddr labels at
         from = if evalAddr labels from' >= 0 then evalAddr labels from' else at + from
         {-badAt = if isAligned coms from then [] else
-                ["Misaligned rep starting at " ++ show from ++ " on " ++ printSrc com ++ ":\n    " ++ show com]
-        badFrom = if isAligned coms (from + len) then [] else
-                ["Misaligned rep ending at " ++ show (from + len) ++ " on " ++ printSrc com ++ ":\n    " ++ show com] -}
+                 ["Misaligned rep starting at " ++ show from ++ " on " ++ printSrc com ++ ":\n    " ++ show com]
+        badFrom = if isAligned coms (from + len @! labels) then [] else
+                ["Misaligned rep ending at " ++ show (AddrSum from' len) ++ " on " ++ printSrc com ++ ":\n    " ++ show com] -}
         -- this doesn't work...
-        --badSize = if rsize == Nothing || rsize == Just (com ^. size) then [] else
-        --        ["Wrong size on " ++ printSrc com ++ ":\n    " ++ show com]
+        badSize = if rsize == Nothing || rsize == Just (com ^. size) then [] else
+                ["Wrong size on " ++ printSrc com ++ ":\n    " ++ show com]
         badFuture = if from < at then [] else
                 ["Future rep on " ++ printSrc com ++ ":\n    " ++ show com]
         badShort = if len @! labels >= 3 then [] else
                 ["Short rep of " ++ show len ++ " on " ++ printSrc com ++ ":\n    " ++ show com]
     in
-    {-badAt ++ badFrom ++-} badFuture ++ badShort-- ++ badSize
+    {-badAt ++ badFrom ++-} badFuture ++ badShort ++ badSize
   _ -> []
 
 checkStartLabel coms =
