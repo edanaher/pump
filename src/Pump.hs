@@ -287,6 +287,9 @@ earlySanityCheck labels coms =
 
 checkCom :: LabelMap -> [Command] -> Command -> [String]
 checkCom labels coms com = case com ^. op of
+  PrintLen len final -> trace ("Len is" ++ show len) $
+    if len @! labels >= 0 && len @! labels < 65536 then [] else
+    ["Print len is " ++ show (len @! labels) ++ "; must be between 0 and 65535 at " ++ printSrc com]
   Label str ->
     let matches = filter (((==) $ com ^. op) . view op) coms
         lines = map printSrc matches

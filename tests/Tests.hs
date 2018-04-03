@@ -112,9 +112,13 @@ testUnknownLabel = TestLabel "Test unknown label" $ TestCase $ do
                 "rep { from = l.firstlabel, to = l.unknownlabel }"
               ]
   insanity @?= ["Label used but not defined: unknownlabel"]
-    -- This should be a sanity check
-    --("print { len = -3 }", "Errors from dsl: \n    [string \"print { len = -3 }\"]:1 Print len must be between 0 and 65535\n"),
-    --
+
+testBadPrintLength = TestLabel "Test bad print length" $ TestCase $ do
+  insanity <- testSanityCheck $ intercalate "\n" [
+                "_\"_start\"",
+                "print { len = -3 }"
+              ]
+  insanity @?= ["Print len is -3; must be between 0 and 65535 at File:2"]
 
 testMisalignedRep = TestLabel "Test misaligned reps" $ TestCase $ do
   insanity <- testSanityCheck $ intercalate "\n" [
@@ -148,6 +152,7 @@ sanityTests = TestLabel "Sanity check" $ TestList [
     testMissingStartLabel,
     testDoubleLabel,
     testUnknownLabel,
+    testBadPrintLength,
     --testMisalignedRep,
     testShortRep
   ]
