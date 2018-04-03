@@ -39,8 +39,6 @@ errorPrograms = [
     ("data { }", "Errors from dsl: \n    [string \"data { }\"]:1 Data command must have string, int, or from field\n"),
     ("print { }", "Errors from dsl: \n    [string \"print { }\"]:1 Print command must have string, len, or from field\n"),
     ("rep { }", "Errors from dsl: \n    [string \"rep { }\"]:1 Rep command must have from and len or to\n"),
-    -- This should be a sanity check
-    --("print { len = -3 }", "Errors from dsl: \n    [string \"print { len = -3 }\"]:1 Print len must be between 0 and 65535\n"),
     ("print { string = \"" ++ ([1..70000] >> "a") ++ "\" }", "Errors from dsl: \n    [string \"print { string = \"aaaaaaaaaaaaaaaaaaaaaaaaaaa...\"]:1 Print string can't be longer than 65535\n")
   ]
 
@@ -82,6 +80,16 @@ testSanityCheck program = do
       withSizes <- return $ Pump.initSizes program
       return $ Pump.sanityCheck Map.empty withSizes
 
+testEarlySanityCheck program = do
+  dslSource <- readFile "lua/dsl.lua"
+  program <- Pump.readProgram ("File", program, "dslfile", dslSource) Nothing
+  case program of
+    Left err -> (err @?= "[No error]") >> return []
+    Right program -> do
+      withSizes <- return $ Pump.initSizes program
+      labels <- return $ Pump.getLabels withSizes
+      return $ Pump.earlySanityCheck labels withSizes
+
 testMissingStartLabel= TestLabel "Test missing _start label" $ TestCase $ do
   insanity <- testSanityCheck $ intercalate "\n" [
                 "_\"firstlabel\"",
@@ -89,7 +97,7 @@ testMissingStartLabel= TestLabel "Test missing _start label" $ TestCase $ do
               ]
   insanity @?= ["Missing \"_start\" label"]
 
-testDoubleLabel= TestLabel "Test duplicate labels" $ TestCase $ do
+testDoubleLabel = TestLabel "Test duplicate labels" $ TestCase $ do
   insanity <- testSanityCheck $ intercalate "\n" [
                 "_\"firstlabel\"",
                 "_\"secondlabel\"",
@@ -97,6 +105,16 @@ testDoubleLabel= TestLabel "Test duplicate labels" $ TestCase $ do
                 "_\"_start\""
               ]
   insanity @?= ["Duplicate label: \"firstlabel\" at:\n    File:1\n    File:3\n"]
+
+testUnknownLabel = TestLabel "Test unknown label" $ TestCase $ do
+  insanity <- testEarlySanityCheck $ intercalate "\n" [
+                "_\"firstlabel\"",
+                "rep { from = l.firstlabel, to = l.unknownlabel }"
+              ]
+  insanity @?= ["Label used but not defined: unknownlabel"]
+    -- This should be a sanity check
+    --("print { len = -3 }", "Errors from dsl: \n    [string \"print { len = -3 }\"]:1 Print len must be between 0 and 65535\n"),
+    --
 
 testMisalignedRep = TestLabel "Test misaligned reps" $ TestCase $ do
   insanity <- testSanityCheck $ intercalate "\n" [
@@ -129,6 +147,7 @@ testShortRep = TestLabel "Test short reps" $ TestCase $ do
 sanityTests = TestLabel "Sanity check" $ TestList [
     testMissingStartLabel,
     testDoubleLabel,
+    testUnknownLabel,
     --testMisalignedRep,
     testShortRep
   ]

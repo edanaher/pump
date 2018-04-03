@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings, TemplateHaskell, DeriveDataTypeable #-}
 
 module Language where
 
@@ -11,6 +11,8 @@ import Control.Lens ((^?), makeLenses)
 
 import qualified Foreign.Lua as Lua
 
+import Data.Generics
+
 type LabelMap = Map String Int
 
 data Address =
@@ -18,7 +20,7 @@ data Address =
   | AddrL String
   | AddrSum Address Address
   | AddrDiff Address Address
-  deriving (Eq)
+  deriving (Eq, Data, Typeable)
 
 instance Show Address where
   show addr = case addr of
@@ -49,7 +51,7 @@ data Op =
   | Copy { _from :: Address, _len :: Address }
   | Label { _label :: String }
   | Padding Int
-  deriving  (Eq)
+  deriving  (Eq, Data, Typeable)
 
 makeLenses ''Op
 
@@ -72,7 +74,7 @@ data Source =
     SrcNone
   | SrcLua (String, Int)
   | SrcCopy SrcedOp Int Int
-  deriving (Eq)
+  deriving (Eq, Data, Typeable)
 
 instance Show Source where
   show src = case src of
@@ -81,13 +83,13 @@ instance Show Source where
     SrcCopy parent which total -> "[" ++ show which ++ "/" ++ show total ++ "; " ++ show parent ++ "]"
 
 newtype SrcedOp = SrcedOp (Op, Source)
-  deriving (Eq)
+  deriving (Eq, Data, Typeable)
 
 instance Show SrcedOp where
   show (SrcedOp (op, src)) = show src ++ ": " ++ show op
 
 data Command = Com { _op :: Op, _src :: Source, _size :: Int, _osize :: Int, _pos :: Int, _opos :: Int }
-  deriving (Eq)
+  deriving (Eq, Data, Typeable)
 
 makeLenses ''Command
 

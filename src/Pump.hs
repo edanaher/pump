@@ -2,7 +2,7 @@
 module Pump where
 
 import qualified Data.Char as Char
-import Data.List (intercalate, mapAccumL, unfoldr, sortBy)
+import Data.List (intercalate, mapAccumL, unfoldr, sortBy, (\\), nub)
 import Control.Monad (liftM)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as Char8
@@ -13,6 +13,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Debug.Trace (trace)
 import Control.Lens ((^.), (^?), view, (&), (.~))
+import Data.Generics
 
 import Language
 import qualified Rep
@@ -235,7 +236,7 @@ updateSizes labels prog = do
           --trace ("Eatlen is " ++ show eatlen ++ " => " ++ show eatlen' ++ "; osize'/opos' are " ++ show osize' ++ "/" ++ show opos' ++ " on + " ++ show com) $
           if eatlen' < 0 then error ("Eatlen went negative!\n" ++ "  Eating from " ++ show eatfrom ++ "\n  had " ++ show eatlen ++ " at " ++ show com) else
           ((Com op' (com ^. src) opsize osize' pos opos):prog', pos', opos', eatlen', eatfrom'))
-        ([], 0, -1, 0, head prog) $ trace ((++) "Formerly Aligned zip:\n" $ unlines $ map show $ prog) prog
+        ([], 0, -1, 0, head prog) prog
   trace ("Updated sizes: \n" ++ showProg (reverse prog')) $ reverse prog'
 
 updateRepSizes :: LabelMap -> [Command] -> [Command]
@@ -271,6 +272,18 @@ isAligned coms target =
   target == 0 || any ((== target) . view opos) coms
 
 printSrc = show . view src
+
+labelsUsed :: [Command] -> [String]
+labelsUsed coms =
+  everything (++) ([] `mkQ` (\addr -> case addr of AddrL l -> [l]; _ -> [])) coms
+
+checkLabelsExist :: LabelMap -> [Command] -> [String]
+checkLabelsExist labels coms =
+  map ("Label used but not defined: " ++) $ nub (labelsUsed coms) \\ Map.keys labels
+
+earlySanityCheck :: LabelMap -> [Command] -> [String]
+earlySanityCheck labels coms =
+   checkLabelsExist labels coms
 
 checkCom :: LabelMap -> [Command] -> Command -> [String]
 checkCom labels coms com = case com ^. op of
@@ -370,22 +383,23 @@ compile filename simfile = do
   withSizes <- return $ initSizes program
   -- TODO: Sanity check labels existing/duplicates/etc.
   initLabels <- return $ getLabels withSizes
+  insanity <- return $ earlySanityCheck initLabels withSizes
+  _ <- if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity) else return ()
   withCopies <- return $ expandCopies initLabels withSizes
   fixedSizes <- return $ fixSizes withCopies
   labels <- return $ getLabels fixedSizes
   insanity <- return $ sanityCheck labels fixedSizes
-  if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity)
-    else do
-    putStrLn $ unlines $ map show $ fixedSizes
-    bytes <- return $ progToBytes labels fixedSizes
-    zeroed <- return $ fixZeros bytes
-    putStrLn $ "\n===== Final labels: ======\n" ++ (unlines $ map (\(l, n) -> l ++ ": " ++ show n) $ sortBy (\a b -> snd a `compare` snd b) $ Map.assocs labels)
-    putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
-    putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
-    simulated <- return $ Simulate.simulate labels fixedSizes
-    putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show simulated )
-    putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render (lines source)) simulated)
-    writeGzip "out.gz" zeroed
-    case simfile of
-      Just simfile -> trace "Writing to simfile" writeFile simfile (unlines $ map (Render.render (lines source)) simulated)
-      Nothing -> trace "simfile is empty" return ()
+  _ <- if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity) else return ()
+  putStrLn $ unlines $ map show $ fixedSizes
+  bytes <- return $ progToBytes labels fixedSizes
+  zeroed <- return $ fixZeros bytes
+  putStrLn $ "\n===== Final labels: ======\n" ++ (unlines $ map (\(l, n) -> l ++ ": " ++ show n) $ sortBy (\a b -> snd a `compare` snd b) $ Map.assocs labels)
+  putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
+  putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
+  simulated <- return $ Simulate.simulate labels fixedSizes
+  putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show simulated )
+  putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render (lines source)) simulated)
+  writeGzip "out.gz" zeroed
+  case simfile of
+    Just simfile -> trace "Writing to simfile" writeFile simfile (unlines $ map (Render.render (lines source)) simulated)
+    Nothing -> return ()

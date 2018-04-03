@@ -1,4 +1,4 @@
-{ mkDerivation, base, hslua, digest, HUnit, stdenv, lens, docopt }:
+{ mkDerivation, base, hslua, digest, HUnit, stdenv, lens, docopt, syb }:
 mkDerivation {
   pname = "pump";
   version = "0.1.0.0";
@@ -6,7 +6,7 @@ mkDerivation {
   isLibrary = false;
   isExecutable = true;
   testHaskellDepends = [ HUnit ];
-  executableHaskellDepends = [ base hslua digest lens docopt ];
+  executableHaskellDepends = [ base hslua digest lens docopt syb ];
   description = "Compiler targeting deflate compressed streams (gzip, zip, etc.)";
   license = stdenv.lib.licenses.bsd3;
   #doCheck = false;
