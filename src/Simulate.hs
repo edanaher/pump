@@ -7,6 +7,7 @@ import Data.List (mapAccumL)
 import Debug.Trace (trace)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Control.Lens ((^.))
 
 
 simulateRep :: Int -> Int -> Int -> [Command] -> ([Command], Int, Int)
@@ -40,7 +41,7 @@ simulate' labels (Com op src size osize pos opos:coms) printLen simpos output =
 
 addLabels coms sims = case (coms, sims) of
   ([], sims) -> sims
-  (_, []) -> []
+  (tail, []) -> filter (\com -> case com ^. op of Label _ -> True; _ -> False)  tail
   (com:coms', sim:sims') ->
     let (labelledSim, coms'', sims'') = case (com, sim) of
           (Com _ _ _ _ pos _, Com _ _ _ _ spos _) | pos < spos -> ([], coms', sim:sims')

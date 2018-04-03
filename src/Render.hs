@@ -34,7 +34,11 @@ instance Show LuaType where
     LRaw s -> s
     LStr s -> show $ concatMap (\c -> if Char.isPrint c then [c] else printf "%03d" (Char.ord c)) s
     LBytes s -> "\"" ++ Char8.unpack (B.concatMap escapeLuaByte s) ++ "\""
-    LAddress s -> show s
+    LAddress s -> case s of
+      AddrI n -> show n
+      AddrL l -> "l." ++ l
+      AddrSum a b -> "(" ++ show (LAddress a) ++ " + " ++ show (LAddress b) ++ ")"
+      AddrDiff a b -> "(" ++ show (LAddress a) ++ " - " ++ show (LAddress b) ++ ")"
     LInt n -> show n
     LBool b -> if b then "true" else "false"
 
@@ -65,9 +69,12 @@ renderCom origsrc com = case com ^. op of
         in "data " ++ args
   Label l -> "_" ++ show l
   Zero ranges ->
-    let lranges = intercalate ", " $ map (\(a, b) -> "{ " ++ show a ++ ", " ++ show b ++ "}") ranges
+    let lranges = intercalate ", " $ map (\(a, b) -> "{ " ++ show (LAddress a) ++ ", " ++ show (LAddress b) ++ "}") ranges
         args = renderArgs $ Map.fromList $ [("ranges", LRaw $ "{" ++ lranges ++ "}")]
     in "zero " ++ args
+  DataInt value size ->
+    let args = renderArgs $ Map.fromList $ [("int", LAddress value), ("size", LInt size)]
+    in "data " ++ args
   _ -> show $ com ^. op
   
   
