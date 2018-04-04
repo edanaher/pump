@@ -48,8 +48,8 @@ renderArgs vals =
   in
   "{ " ++ intercalate ", " parts ++ "}"
 
-renderCom :: Maybe String -> Command -> String
-renderCom origsrc com = case com ^. op of
+renderComHalf :: Maybe String -> Command -> String
+renderComHalf origsrc com = case com ^. op of
   Rep from len at rsize final ->
     let at' = case at of Just at -> [("at", LAddress at)]; _ -> []
         size' = case rsize of Just rsize -> [("size", LInt rsize)]; _ -> [("size", LInt $ com ^. size)]
@@ -76,18 +76,24 @@ renderCom origsrc com = case com ^. op of
     let args = renderArgs $ Map.fromList $ [("int", LAddress value), ("size", LInt size)]
     in "data " ++ args
   _ -> show $ com ^. op
-  
-  
-render :: [String] -> Command -> String
-render srcs com@(Com op src size osize pos opos) =
-  let origsrc = case src of
+
+renderCom :: Maybe String -> Command -> Command -> (String, String)
+renderCom origsrc input output =
+  (renderComHalf origsrc input, renderComHalf origsrc output)
+
+
+render :: [String] -> (Command, Command) -> (String, String)
+render srcs (input, output) =
+  let origsrc = case input ^. src of
         SrcLua (f, n) -> Just $ srcs !! (n - 1)
         _ -> Nothing
+      (inputCom, outputCom) = renderCom Nothing input output
   in
   -- TODO: actually use the origsrc.  It breaks weirdly right now.
   --printf "--[[%3d=>%3d +%2d=>%2d]] %s -- %s" pos opos size osize (renderCom {-origsrc-}Nothing com) (show origsrc)
-  printf "--[[%3d=>%3d +%2d=>%2d]] %s" pos opos size osize (renderCom {-origsrc-}Nothing com)
+  (printf "--[[%3d=>%3d +%2d=>%2d]] %s" (input ^. pos) (input ^. opos) (input ^. size) (input ^. osize) inputCom,
+   printf "--[[%3d=>%3d +%2d=>%2d]] %s" (input ^. pos) (input ^. opos) (input ^. size) (input ^. osize) outputCom)
 
 renderProgram :: [String] -> [Command] -> [Command] -> ([String], [String])
 renderProgram srcs inputs outputs =
-  (map (render srcs) inputs, map (render srcs) outputs)
+  unzip (map (render srcs) $ zip inputs outputs)
