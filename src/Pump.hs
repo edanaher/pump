@@ -8,6 +8,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as Char8
 import System.Directory (makeAbsolute)
 import System.Environment (getExecutablePath)
+import System.FilePath (dropExtension)
 import Data.Bits (shiftR, (.&.))
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -375,8 +376,15 @@ fixZeros program =
       case bytes of Bytes b -> (com, bytes)
                     BZero _ -> (com, Bytes zero)) program
 
-compile :: String -> Maybe String -> IO ()
-compile filename simfile = do
+compile :: String -> Maybe String -> Bool -> Maybe String -> IO ()
+compile filename outfileOpt simulate simfileOpt = do
+  basename <- return $ dropExtension filename
+  outfile <- return $ case outfileOpt of
+    Just outfile -> outfile
+    Nothing -> basename ++ ".gz"
+  simfile <- return $ case simfileOpt of
+    Just simfile -> simfile
+    Nothing -> dropExtension outfile
   source <- readFile filename
   dslFile <- dslPath
   dslSource <- readFile dslFile
@@ -402,7 +410,10 @@ compile filename simfile = do
   simulated <- return $ Simulate.simulate labels fixedSizes
   putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show simulated )
   putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render (lines source)) simulated)
-  writeGzip "out.gz" zeroed
-  case simfile of
-    Just simfile -> trace "Writing to simfile" writeFile simfile (unlines $ map (Render.render (lines source)) simulated)
-    Nothing -> return ()
+  writeGzip outfile zeroed
+  if simulate then do
+    (input, output) <- return $ Render.renderProgram (lines source) fixedSizes simulated
+    writeFile (simfile ++ ".in") $ unlines input
+    writeFile (simfile ++ ".out") $ unlines output
+  else
+    return ()

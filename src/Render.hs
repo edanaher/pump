@@ -85,4 +85,9 @@ render srcs com@(Com op src size osize pos opos) =
         _ -> Nothing
   in
   -- TODO: actually use the origsrc.  It breaks weirdly right now.
-  printf "--[[%3d=>%3d +%2d=>%2d]] %s -- %s" pos opos size osize (renderCom {-origsrc-}Nothing com) (show origsrc)
+  --printf "--[[%3d=>%3d +%2d=>%2d]] %s -- %s" pos opos size osize (renderCom {-origsrc-}Nothing com) (show origsrc)
+  printf "--[[%3d=>%3d +%2d=>%2d]] %s" pos opos size osize (renderCom {-origsrc-}Nothing com)
+
+renderProgram :: [String] -> [Command] -> [Command] -> ([String], [String])
+renderProgram srcs inputs outputs =
+  (map (render srcs) inputs, map (render srcs) outputs)
