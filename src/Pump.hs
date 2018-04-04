@@ -195,19 +195,24 @@ getLabels =
               Label str -> True
               _ -> False)
 
+addAtToReps com = case com ^. op of
+  Rep from len Nothing rsize final -> com & ((op . at) .~ (Just $ AddrI $ com ^. pos))
+  _ -> com
+
 expandCopy :: LabelMap -> [Command] -> Command -> [Command]
 expandCopy labels prog com =
   let Copy from len = com ^. op
-      suffix = dropWhile (\com -> com ^. pos < from @! labels) prog
-      startOpos = head suffix ^. opos
-      coms = takeWhile (\com -> com ^. pos < from @! labels + len @! labels) suffix
-      comsWithoutLabels = filter (\com -> case com ^. op of Label _ -> False ; _ -> True) coms
+      suffix = dropWhile (\(com, n) -> com ^. pos < from @! labels) (zip prog [0..])
+      coms = takeWhile (\(com, n) -> com ^. pos < from @! labels + len @! labels) suffix
+      comsWithoutLabels = filter (\(com, n) -> case com ^. op of Label _ -> False ; _ -> True) coms
 
+      src' i = SrcCopy (SrcedOp (com ^. op, com ^. src)) i (length comsWithoutLabels)
   in trace ("Copy: " ++ show from ++ " (" ++ show (from @! labels) ++ ")," ++ show len ++ " (" ++ show (len @! labels) ++ ") => " ++ (unlines $ map show comsWithoutLabels))
-     zipWith (\i com' -> com' & src .~ SrcCopy (SrcedOp (com ^. op, com ^. src)) i (length comsWithoutLabels)) [0..] comsWithoutLabels
+     zipWith (\i (com', n) -> com & (src .~ src' i) . (op .~ Clone n)) [0..] comsWithoutLabels
 
-expandCopies :: LabelMap -> [Command] -> [Command]
-expandCopies labels prog =
+expandCopies :: [Command] -> [Command]
+expandCopies prog =
+  let labels = getLabels prog in
   debug ("Expanding copies from \n" ++ (unlines $ map show prog) ++ "\n")
   concatMap (\com -> case com ^. op of
         Copy from len -> expandCopy labels prog com
@@ -217,7 +222,6 @@ expandCopies labels prog =
 
 updateSizes :: Map String Int -> [Command] -> [Command]
 updateSizes labels prog = do
-  _ <- trace ("Updating sizes starting from " ++ (unlines $ map show prog)) $ return ()
   (prog', pos, opos, eatlen, eatfrom) <- return $ foldl (\ (prog', pos, opos, eatlen, eatfrom) com ->
         let op' = com ^. op
             opsize = toSize labels prog op' opos
@@ -256,11 +260,11 @@ updateRepSizes labels prog =
 fixSizes :: [Command] -> [Command]
 fixSizes prog =
   let labels = trace ("Fixing sizes:\n" ++ unlines (map show prog)) $ getLabels prog
-      prog' = updateSizes labels prog
+      prog' = trace ("\ESC[31;1mUpdating sizes:\n" ++ unlines (map show prog) ++ "\n\nfrom:\n" ++ unlines (map show prog) ++ "\ESC[0m") $ updateSizes labels prog
   in
   if prog == prog'
   then prog
-  else fixSizes prog'
+  else trace ("Updated sizes:\n" ++ unlines (map show prog')) fixSizes prog'
 
 
 
@@ -327,15 +331,23 @@ intToBytes :: Int -> Int -> B.ByteString
 intToBytes len n = B.pack [fromIntegral $ (n `shiftR` (8*i)) .&. 255 | i <- [0..len-1] ]
 
 posToOpos :: [Command] ->  Int -> Int
-posToOpos [] target = error "Ran out of command searching for pos"
+posToOpos [] target = error $ "Ran out of command searching for pos " ++ show target ++ " to convert to opos"
 posToOpos _ 0 = 0
 posToOpos (Com op src size osize pos opos:coms') target =
     if target < pos then opos else --error $ "Converting pos " ++ show target ++ " to opos isn't a boundary" else
     if target == pos then opos else
     posToOpos coms' target
 
+declone :: [Command] -> [Command]
+declone prog =
+  let resolve c = case c ^. op of
+        Clone n -> trace ("Resolving " ++ show n ++ " as " ++ show (prog !! n)) c & op .~ (resolve (prog !! n) ^. op)
+        _ -> c
+  in
+  map resolve prog
+
 toBytes :: LabelMap -> [Command] -> Op -> Int -> B.ByteString
-toBytes labels coms op opos = case op of
+toBytes labels coms op' opos' = case op' of
   Data str -> str
   DataInt addr size -> intToBytes size (addr @! labels)
   Zero ranges -> Char8.pack "ZERO"
@@ -347,10 +359,11 @@ toBytes labels coms op opos = case op of
                           (intToBytes 2 $ evalAddr labels len) `Char8.append`
                           (intToBytes 2 $ 65535 - (evalAddr labels len))
   Rep from len (Just at) _ final -> Rep.encode (evalAddr labels from) (evalAddr labels len) (posToOpos coms (evalAddr labels at)) final
-  Rep from len Nothing _ final -> Rep.encode (evalAddr labels from) (evalAddr labels len) opos final
+  Rep from len Nothing _ final -> Rep.encode (evalAddr labels from) (evalAddr labels len) opos' final
   Label _ -> B.empty
   Copy from len -> B.empty
-  _ -> error $ "Converting unknown op to bytes:\n  " ++ show op
+  Clone n -> toBytes labels coms ((coms !! n) ^. op) ((coms !! n) ^. opos) -- TODO: This is the wrong opos
+  _ -> error $ "Converting unknown op to bytes:\n  " ++ show op'
 
 toSize :: LabelMap -> [Command] -> Op -> Int -> Int
 toSize labels coms op opos = case op of
@@ -396,23 +409,25 @@ compile filename outfileOpt simulate simfileOpt rawsim = do
   initLabels <- return $ getLabels withSizes
   insanity <- return $ earlySanityCheck initLabels withSizes
   _ <- if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity) else return ()
-  withCopies <- return $ expandCopies initLabels withSizes
-  fixedSizes <- return $ fixSizes withCopies
+  withClones <- return $ expandCopies withSizes
+  fixedSizes <- return $ fixSizes withClones
+  --error "Success"
   labels <- return $ getLabels fixedSizes
   insanity <- return $ sanityCheck labels fixedSizes
   _ <- if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity) else return ()
   putStrLn $ unlines $ map show $ fixedSizes
-  bytes <- return $ progToBytes labels fixedSizes
+  decloned <- return $ declone fixedSizes
+  bytes <- return $ progToBytes labels decloned
   zeroed <- return $ fixZeros bytes
   putStrLn $ "\n===== Final labels: ======\n" ++ (unlines $ map (\(l, n) -> l ++ ": " ++ show n) $ sortBy (\a b -> snd a `compare` snd b) $ Map.assocs labels)
   putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
   --putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
-  simulated <- return $ Simulate.simulate labels fixedSizes
+  simulated <- return $ Simulate.simulate labels decloned
   putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show simulated )
   --putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render (lines source)) simulated)
   writeGzip outfile zeroed
   if simulate then do
-    (input, output) <- return $ Render.renderProgram (lines source) labels fixedSizes simulated rawsim
+    (input, output) <- return $ Render.renderProgram (lines source) labels decloned simulated rawsim
     writeFile (simfile ++ ".in") $ unlines input
     writeFile (simfile ++ ".out") $ unlines output
   else

@@ -16,4 +16,7 @@ mkDerivation {
       cp lua/dsl.lua $out/lua
     '';
   testTarget = ''--show-details=direct -v'';
+
+  enableLibraryProfiling = true;
+  enableExecutableProfiling = true;
 }

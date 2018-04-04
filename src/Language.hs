@@ -49,6 +49,7 @@ data Op =
   | Data B.ByteString
   | DataInt { _value :: Address, _dsize :: Int }
   | Copy { _from :: Address, _len :: Address }
+  | Clone { _index :: Int }
   | Label { _label :: String }
   | Padding Int
   deriving  (Eq, Data, Typeable)
@@ -69,6 +70,7 @@ instance Show Op where
     Copy from len -> "Copy @" ++ show from ++ "+" ++ show len
     Label name -> name ++ ":"
     Padding len -> "[Padding " ++ show len ++ "]"
+    Clone n -> "[Clone " ++ show n ++ "]"
 
 data Source =
     SrcNone
