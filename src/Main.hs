@@ -14,9 +14,10 @@ Usage:
   pump [options] <file> [options]
 
 Options:
-  --simfile=<simfile>    Save simulated output to <simfile>
-  --output=<outfile>, -o Write output file to <outfile>
-  --simulate, -s         Simulate and save to <simfile>.in/.out (defaults to <outfile>)
+  --simfile=<simfile>    Save simulated output to <simfile>.
+  --output=<outfile>, -o Write output file to <outfile>.
+  --simulate, -s         Simulate and save to <simfile>.in/.out (defaults to <outfile>).
+  --rawsim, -r           Don't "clean up" simulated files.  Safer but harder to work with.
 |]
 
 getArgOrExit = getArgOrExitWith params
@@ -28,4 +29,5 @@ main = do
   simfile <- return $ args `getArg` (longOption "simfile")
   simulate <- return $ args `isPresent` (longOption "simulate")
   outfile <- return $ args `getArg` (longOption "output")
-  Pump.compile filename outfile simulate simfile
+  rawsim <- return $ args `isPresent` (longOption "rawsim")
+  Pump.compile filename outfile simulate simfile rawsim

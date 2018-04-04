@@ -376,8 +376,8 @@ fixZeros program =
       case bytes of Bytes b -> (com, bytes)
                     BZero _ -> (com, Bytes zero)) program
 
-compile :: String -> Maybe String -> Bool -> Maybe String -> IO ()
-compile filename outfileOpt simulate simfileOpt = do
+compile :: String -> Maybe String -> Bool -> Maybe String -> Bool -> IO ()
+compile filename outfileOpt simulate simfileOpt rawsim = do
   basename <- return $ dropExtension filename
   outfile <- return $ case outfileOpt of
     Just outfile -> outfile
@@ -412,7 +412,7 @@ compile filename outfileOpt simulate simfileOpt = do
   --putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render (lines source)) simulated)
   writeGzip outfile zeroed
   if simulate then do
-    (input, output) <- return $ Render.renderProgram (lines source) fixedSizes simulated
+    (input, output) <- return $ Render.renderProgram (lines source) labels fixedSizes simulated rawsim
     writeFile (simfile ++ ".in") $ unlines input
     writeFile (simfile ++ ".out") $ unlines output
   else

@@ -9,7 +9,7 @@ import Data.Maybe (fromJust)
 import Data.Map.Strict (Map)
 import Text.Printf (printf)
 
-import Control.Lens ((^.))
+import Control.Lens ((^.), (&), (.~))
 
 import Language
 
@@ -48,8 +48,8 @@ renderArgs vals =
   in
   "{ " ++ intercalate ", " parts ++ "}"
 
-renderComHalf :: Maybe String -> Command -> String
-renderComHalf origsrc com = case com ^. op of
+renderCom :: Maybe String -> Command -> String
+renderCom origsrc com = case com ^. op of
   Rep from len at rsize final ->
     let at' = case at of Just at -> [("at", LAddress at)]; _ -> []
         size' = case rsize of Just rsize -> [("size", LInt rsize)]; _ -> [("size", LInt $ com ^. size)]
@@ -77,23 +77,36 @@ renderComHalf origsrc com = case com ^. op of
     in "data " ++ args
   _ -> show $ com ^. op
 
-renderCom :: Maybe String -> Command -> Command -> (String, String)
-renderCom origsrc input output =
-  (renderComHalf origsrc input, renderComHalf origsrc output)
 
-
-render :: [String] -> (Command, Command) -> (String, String)
-render srcs (input, output) =
-  let origsrc = case input ^. src of
+render :: [String] -> Command -> String
+render srcs com@(Com op src size osize pos opos) =
+  let origsrc = case src of
         SrcLua (f, n) -> Just $ srcs !! (n - 1)
         _ -> Nothing
-      (inputCom, outputCom) = renderCom Nothing input output
   in
   -- TODO: actually use the origsrc.  It breaks weirdly right now.
   --printf "--[[%3d=>%3d +%2d=>%2d]] %s -- %s" pos opos size osize (renderCom {-origsrc-}Nothing com) (show origsrc)
-  (printf "--[[%3d=>%3d +%2d=>%2d]] %s" (input ^. pos) (input ^. opos) (input ^. size) (input ^. osize) inputCom,
-   printf "--[[%3d=>%3d +%2d=>%2d]] %s" (input ^. pos) (input ^. opos) (input ^. size) (input ^. osize) outputCom)
+  printf "--[[%3d=>%3d +%2d=>%2d]] %s" pos opos size osize (renderCom {-origsrc-}Nothing com)
 
-renderProgram :: [String] -> [Command] -> [Command] -> ([String], [String])
-renderProgram srcs inputs outputs =
-  unzip (map (render srcs) $ zip inputs outputs)
+alignFields labels input output =
+  case (input ^. op, output ^. op) of
+    (Rep _ _ iat _ ifinal, Rep _ _ oat _ ofinal) ->
+      let at' = case (iat, oat) of
+            (Just a, Nothing) | a @! labels == input ^. opos  -> iat
+            _ -> iat
+      in output & ((op . at) .~ at')
+
+    _ -> output
+
+
+cleanup :: LabelMap -> [Command] -> [Command] -> [Command]
+cleanup labels inputs outputs =
+  let paired = zip inputs outputs -- This should be smarter
+      cleaned = map (uncurry $ alignFields labels) paired
+  in
+  cleaned
+
+renderProgram :: [String] -> LabelMap -> [Command] -> [Command] -> Bool -> ([String], [String])
+renderProgram srcs labels inputs outputs rawsim =
+  let outputs' = if rawsim then outputs else cleanup labels inputs outputs
+  in (map (render srcs) inputs, map (render srcs) outputs')
