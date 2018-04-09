@@ -101,7 +101,7 @@ alignFields labels input output =
 
 cleanup :: LabelMap -> [Command] -> [Command] -> [Command]
 cleanup labels inputs outputs =
-  let paired = zip inputs outputs -- This should be smarter
+  let paired = zip (inputs ++ repeat (Com (Padding 0) SrcNone 0 0 0 0)) outputs -- This should be smarter
       cleaned = map (uncurry $ alignFields labels) paired
   in
   cleaned

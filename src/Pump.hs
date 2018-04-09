@@ -202,22 +202,37 @@ addAtToReps com = case com ^. op of
 expandCopy :: LabelMap -> [Command] -> Command -> [Command]
 expandCopy labels prog com =
   let Copy from len = com ^. op
-      suffix = dropWhile (\(com, n) -> com ^. pos < from @! labels) (zip prog [0..])
-      coms = takeWhile (\(com, n) -> com ^. pos < from @! labels + len @! labels) suffix
+      rawExpand (com, n) = case com ^. op of
+        Copy from len ->
+          let suffix = dropWhile (\(com, n) -> com ^. pos < from @! labels) (zip prog [0..])
+              coms = takeWhile (\(com, n) -> com ^. pos < from @! labels + len @! labels) suffix
+          in concatMap rawExpand coms
+        _ -> [(com, n)]
+      coms = rawExpand (com, 0)
       comsWithoutLabels = filter (\(com, n) -> case com ^. op of Label _ -> False ; _ -> True) coms
 
       src' i = SrcCopy (SrcedOp (com ^. op, com ^. src)) i (length comsWithoutLabels)
-  in trace ("Copy: " ++ show from ++ " (" ++ show (from @! labels) ++ ")," ++ show len ++ " (" ++ show (len @! labels) ++ ") => " ++ (unlines $ map show comsWithoutLabels))
+  in trace ("Copy: " {--++ show (-99 ++ " (" ++ show (from @! labels) ++ ")," ++ show len ++ " (" ++ show (len @! labels)--} ++ ") => " ++ (unlines $ map show comsWithoutLabels))
      zipWith (\i (com', n) -> com & (src .~ src' i) . (op .~ Clone n)) [0..] comsWithoutLabels
 
 expandCopies :: [Command] -> [Command]
 expandCopies prog =
-  let labels = getLabels prog in
-  debug ("Expanding copies from \n" ++ (unlines $ map show prog) ++ "\n")
-  concatMap (\com -> case com ^. op of
-        Copy from len -> expandCopy labels prog com
-        _ -> [com]
-      ) prog
+  let labels = getLabels prog
+      ((_, deltas), unadjusted) = debug ("Expanding copies from \n" ++ (unlines $ map show prog) ++ "\n")
+        mapAccumL (\(i, deltas) com -> case com ^. op of
+              Copy from len ->
+                let copied = expandCopy labels prog com
+                in ((i + 1, (i, length copied - 1):deltas), copied)
+              _ -> ((i + 1, deltas), [com])
+            ) (0, []) prog
+
+      adjust [] n n' = n
+      adjust ((p, d):ds) n n' = trace ("Adjusting " ++ show n' ++ ", " ++ show p ++ " -> " ++ show (n + d)) $ if n' > p then adjust ds (n + d) n' else n
+      adjusted = flip map (concat unadjusted) $ \ com -> case com ^. op of
+        Clone n -> com & op . index .~ adjust (reverse deltas) n n
+        _ -> com
+  in
+    trace ("Used " ++ show deltas ++ " to adjust \n " ++ showProg (concat unadjusted) ++ "\n to \n" ++ showProg adjusted) adjusted
 
 
 updateSizes :: Map String Int -> [Command] -> [Command]
@@ -341,7 +356,8 @@ posToOpos (Com op src size osize pos opos:coms') target =
 declone :: [Command] -> [Command]
 declone prog =
   let resolve c = case c ^. op of
-        Clone n -> trace ("Resolving " ++ show n ++ " as " ++ show (prog !! n)) c & op .~ (resolve (prog !! n) ^. op)
+        Clone n -> c & op .~ (resolve (prog !! n) ^. op)
+        Rep _ _ Nothing _ _ -> c & op . at .~ Just (AddrI $ c ^. pos)
         _ -> c
   in
   map resolve prog
@@ -381,14 +397,6 @@ progToBytes labels program =
             Zero ranges -> (com, BZero (map ( \(a, b) -> (evalAddr labels a, evalAddr labels b)) ranges))
             _ -> (com, Bytes $ toBytes labels program op opos)) program
 
-fixZeros :: [(Command, ByteOp)] -> [(Command, ByteOp)]
-fixZeros program =
-  let (BZero ranges) = head $ map snd $ filter (\ (_, b) -> case b of BZero _ -> True; _ -> False) program
-      zero = Zero.encode ranges program
-  in trace ("ZEROS:" ++ show zero) $ map (\ (com, bytes) ->
-      case bytes of Bytes b -> (com, bytes)
-                    BZero _ -> (com, Bytes zero)) program
-
 compile :: String -> Maybe String -> Bool -> Maybe String -> Bool -> IO ()
 compile filename outfileOpt simulate simfileOpt rawsim = do
   basename <- return $ dropExtension filename
@@ -417,8 +425,8 @@ compile filename outfileOpt simulate simfileOpt rawsim = do
   _ <- if insanity /= [] then error $ "Sanity check failed:\n" ++ (unlines $ map ((++) "  ") insanity) else return ()
   putStrLn $ unlines $ map show $ fixedSizes
   decloned <- return $ declone fixedSizes
-  bytes <- return $ progToBytes labels decloned
-  zeroed <- return $ fixZeros bytes
+  bytes <- return $ trace ("decloned to:\n" ++ showProg decloned) progToBytes labels decloned
+  zeroed <- return $ Zero.fix bytes
   putStrLn $ "\n===== Final labels: ======\n" ++ (unlines $ map (\(l, n) -> l ++ ": " ++ show n) $ sortBy (\a b -> snd a `compare` snd b) $ Map.assocs labels)
   putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
   --putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
