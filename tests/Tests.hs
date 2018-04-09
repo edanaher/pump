@@ -10,6 +10,7 @@ import qualified Pump
 import qualified Language as L
 
 import Control.Exception
+import Control.Lens ((&), (.~))
 import Control.Monad
 
 main = do
@@ -157,6 +158,108 @@ sanityTests = TestLabel "Sanity check" $ TestList [
     testShortRep
   ]
 
+copyPrograms :: [(String, [String], [String])]
+copyPrograms = [
+    ("basic copy", [
+        "data { string = \"some data\" }",
+        "_\"endcopy\"",
+        "data { from = 0, to = l.endcopy}"
+      ], [
+        "data { string = \"some data\" }",
+        "_\"endcopy\"",
+        "data { string = \"some data\" }"
+    ]),
+    ("multiple expanding copies", [
+        "data { string = \"some data\" }",
+        "data { string = \"some other data\" }",
+        "_\"endcopy\"",
+        "data { from = 0, to = l.endcopy}",
+        "_\"second_copy\"",
+        "data { string = \"more data\" }",
+        "data { string = \"more other data\" }",
+        "_\"end_second_copy\"",
+        "data { from = l.second_copy, to = l.end_second_copy}"
+      ], [
+        "data { string = \"some data\" }",
+        "data { string = \"some other data\" }",
+        "_\"endcopy\"",
+        "data { string = \"some data\" }",
+        "data { string = \"some other data\" }",
+        "_\"second_copy\"",
+        "data { string = \"more data\" }",
+        "data { string = \"more other data\" }",
+        "_\"end_second_copy\"",
+        "data { string = \"more data\" }",
+        "data { string = \"more other data\" }"
+    ]),
+    ("recursive expanding copies", [
+        "data { string = \"some data\" }",
+        "data { string = \"some other data\" }",
+        "_\"endcopy\"",
+        "data { from = 0, to = l.endcopy}",
+        "_\"end_second_copy\"",
+        "data { from = l.endcopy, to = l.end_second_copy}"
+      ], [
+        "data { string = \"some data\" }",
+        "data { string = \"some other data\" }",
+        "_\"endcopy\"",
+        "data { string = \"some data\" }",
+        "data { string = \"some other data\" }",
+        "_\"end_second_copy\"",
+        "data { string = \"some data\" }",
+        "data { string = \"some other data\" }"
+    ]),
+    ("long copies", [
+        "data { from = l.copy, to = l.finish}",
+        "data { from = l.copy, to = l.finish}",
+        "_\"copy\"",
+        "data { string = \"data 1\" }",
+        "data { string = \"data 2\" }",
+        "data { string = \"data 3\" }",
+        "_\"finish\"",
+        "data { from = l.copy, to = l.finish}"
+      ], [
+        "data { string = \"data 1\" }",
+        "data { string = \"data 2\" }",
+        "data { string = \"data 3\" }",
+        "data { string = \"data 1\" }",
+        "data { string = \"data 2\" }",
+        "data { string = \"data 3\" }",
+        "_\"copy\"",
+        "data { string = \"data 1\" }",
+        "data { string = \"data 2\" }",
+        "data { string = \"data 3\" }",
+        "_\"finish\"",
+        "data { string = \"data 1\" }",
+        "data { string = \"data 2\" }",
+        "data { string = \"data 3\" }"
+    ])
+--    ("print { string = \"this is a test\" }", L.Print "this is a test" False),
+--    ("print { len = 99 }", L.PrintLen (L.AddrI 99) False),
+--    ("print { len = 99, final = true }", L.PrintLen (L.AddrI 99) True)
+  ]
 
+fromRight a = case a of
+  Right x -> x
+  Left err -> error err
 
-tests = TestList [ repTests, readTests, sanityTests ]
+expandClones prog = do
+  dslSource <- readFile "lua/dsl.lua"
+  prog' <- Pump.readProgram ("File", (intercalate "\n" prog), "dslfile", dslSource) Nothing
+  withSizes <- return $ Pump.initSizes $ fromRight prog'
+  withClones <- return $ Pump.expandCopies withSizes
+  fixedSizes <- return $ Pump.fixSizes withClones
+  return $ Pump.declone fixedSizes
+
+stripSrcs prog =
+  map (\com -> com & (L.src .~ L.SrcNone)) prog
+
+testCopyProgram prog1 prog2 = do
+  prog1' <- expandClones prog1
+  prog2' <- expandClones prog2
+  stripSrcs prog1' @?= stripSrcs prog2'
+
+copyTests = TestLabel "Copies" $ TestList $ flip map copyPrograms $ \(name, prog1, prog2) ->
+    TestLabel name $ TestCase $ testCopyProgram prog1 prog2
+
+tests = TestList [ repTests, readTests, sanityTests, copyTests ]
