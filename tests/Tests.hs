@@ -4,13 +4,15 @@ import qualified Data.ByteString.Char8 as Char8
 import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Debug.Trace (trace)
 
 import qualified Rep
+import qualified Zero
 import qualified Pump
 import qualified Language as L
 
 import Control.Exception
-import Control.Lens ((&), (.~))
+import Control.Lens ((&), (.~), (^.))
 import Control.Monad
 
 main = do
@@ -276,4 +278,26 @@ testCopyProgram prog1 prog2 = do
 copyTests = TestLabel "Copies" $ TestList $ flip map copyPrograms $ \(name, prog1, prog2) ->
     TestLabel name $ TestCase $ testCopyProgram prog1 prog2
 
-tests = TestList [ repTests, readTests, sanityTests, copyTests ]
+doZeros prog = do
+  decloned <- expandClones prog
+  labels <- return $ Pump.getLabels decloned
+  bytes <- return $ Pump.progToBytes labels decloned
+  return $ Zero.fix bytes
+
+zeroPrograms = [("Basic", [
+              "data { string = \"testdata\" }",
+              "zero { ranges = {{0, l.finish }} }",
+              "_\"finish\""
+             ], ["\195<<\244"])
+            ]
+
+testZeroProgram prog targetZeros = do
+  zeroed <- doZeros prog
+  zeros <- return $ filter (\(c, _) -> case c ^. L.op of L.Zero _ -> True; _ -> False) zeroed
+  zeroBytes <- return $ map (\(c, L.Bytes b) -> b) zeros
+  zeroBytes @?= map Char8.pack targetZeros
+
+zeroTests = TestLabel "Zeros" $ TestList $ flip map zeroPrograms $ \(name, program, zeros) ->
+  TestLabel name $ TestCase $ testZeroProgram program zeros
+
+tests = TestList [ repTests, readTests, sanityTests, copyTests, zeroTests ]
