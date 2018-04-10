@@ -233,10 +233,24 @@ copyPrograms = [
         "data { string = \"data 1\" }",
         "data { string = \"data 2\" }",
         "data { string = \"data 3\" }"
+    ]),
+    ("rep adjustments", [
+        "data { from = l.copy, to = l.finish}",
+        "_\"copy\"",
+        "rep { from = 0, to = l.copy, size = 8 }",
+        "rep { from = 0, to = l.copy, at = l.copy, size = 8 }",
+        "rep { from = 0, to = l.copy, at = 0, size = 8 }",
+        "_\"finish\""
+      ], [
+        "rep { from = 0, to = l.copy, at = 24, size = 8 }",
+        "rep { from = 0, to = l.copy, at = l.copy, size = 8 }",
+        "rep { from = 0, to = l.copy, at = 0, size = 8 }",
+        "_\"copy\"",
+        "rep { from = 0, to = l.copy, size = 8 }",
+        "rep { from = 0, to = l.copy, at = l.copy, size = 8 }",
+        "rep { from = 0, to = l.copy, at = 0, size = 8 }",
+        "_\"finish\""
     ])
---    ("print { string = \"this is a test\" }", L.Print "this is a test" False),
---    ("print { len = 99 }", L.PrintLen (L.AddrI 99) False),
---    ("print { len = 99, final = true }", L.PrintLen (L.AddrI 99) True)
   ]
 
 fromRight a = case a of
