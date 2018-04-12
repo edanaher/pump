@@ -72,6 +72,7 @@ renderCom origsrc com = case com ^. op of
   Zero ranges ->
     let lranges = intercalate ", " $ map (\(a, b) -> "{ " ++ show (LAddress a) ++ ", " ++ show (LAddress b) ++ "}") ranges
         args = renderArgs $ Map.fromList $ [("ranges", LRaw $ "{" ++ lranges ++ "}")]
+    -- TODO: Until simulating  fixes zeros properly, the args aren't completely meaningful :(
     in "zero " ++ args
   DataInt value size ->
     let args = renderArgs $ Map.fromList $ [("int", LAddress value), ("size", LInt size)]
@@ -124,27 +125,32 @@ collapseCopies labels inputs outputs =
       startsCopy (SrcCopy _ 0 _) = True
       startsCopy _ = False
       getSrc (SrcCopy (SrcedOp (op, _)) _ _) = op
+      similar op1 op2 = case (op1, op2) of
+        (Zero ranges1, Zero ranges2) ->
+           let evalRange (a, b) = (a @! labels, b @! labels) in
+           map evalRange ranges1 == map evalRange ranges2
+        _ -> op1 == op2
       prefixMatch _ [] = True
       prefixMatch [] _ = False
-      prefixMatch (c:cs) (t:ts) = trace ("Prefix matching\n" ++ show c ++ "\n" ++ show t ++ "\n") c ^. op == t ^. op && prefixMatch cs ts
+      prefixMatch (c:cs) (t:ts) = (c ^. op) `similar` (t ^. op) && prefixMatch cs ts
       substCopies input output = case (input, output) of
         (i:input', o:output') ->
           if startsCopy (i ^. src) then
             let copies = filter (prefixMatch input . snd) copyCandidates in
             case copies of
               [] -> let (input'', output'') = substCopies input' output'
-                    in trace "Didn't find matching copy" (i:input'', o:output'')
+                    in (i:input'', o:output'')
               (((start, len), copy):_) ->
                    let (input'', output'') = substCopies (drop (length copy) input) (drop (length copy) output)
-                   in trace "Found matching copy" (Com (getSrc $ i ^. src) SrcNone 0 0 0 0:input'',
-                                                   Com (Copy start len) SrcNone 0 0 0 0:output'')
+                   in (Com (getSrc $ i ^. src) SrcNone 0 0 0 0:input'',
+                       Com (Copy start len) SrcNone 0 0 0 0:output'')
 
           else
             let (input'', output'') = substCopies input' output'
             in (i:input'', o:output'')
         _ -> (input, output)
 --  in trace ("copies are \n" ++ unlines (map (\(src, lines) -> show src ++ " => \n" ++ unlines (map show lines) ++ "\n\n") copies)) outputs
-  in trace ("Copy indices: " ++ show copyIndices ++ " => candidates " ++ unlines (map (\((start, len), coms) -> show start ++ "+" ++ show len ++ "\n" ++ unlines (map show coms) ++ "\n" ) copyCandidates)) substCopies inputs outputs
+  in {--trace ("Copy indices: " ++ show copyIndices ++ " => candidates " ++ unlines (map (\((start, len), coms) -> show start ++ "+" ++ show len ++ "\n" ++ unlines (map show coms) ++ "\n" ) copyCandidates)) --} substCopies inputs outputs
 
 cleanup :: LabelMap -> [Command] -> [Command] -> ([Command], [Command])
 cleanup labels inputs outputs =

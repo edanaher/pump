@@ -29,6 +29,10 @@ simulate' labels (Com op src size osize pos opos:coms) printLen simpos output =
           --trace ("Eating " ++ show op ++ " at " ++ show pos ++ "/" ++ show opos) $
           case op of
             Label _ -> ([], printLen, simpos)
+            {-Zero ranges ->
+                let adjust x = trace ("Adjusting " ++ show simpos ++ " from " ++ show pos) AddrI $ (x @! labels) + simpos - pos
+                    ranges' = map (\(a,b) -> (adjust a, adjust b)) ranges in
+                ([Com (Zero ranges') src size osize simpos 0], printLen - size, simpos + size)-}
             _ -> ([Com op src size osize simpos 0], printLen - size, simpos + size)
         else
           --trace ("simulating " ++ show op ++ " at " ++ show simpos ++ "/") $
@@ -77,6 +81,7 @@ fixOutPoses labels sims = snd $ mapAccumL (\ (opos, eatlen) (Com op src size osi
 fixUpSimulated :: (Map String Int) -> [Command] -> [Command] -> [Command]
 fixUpSimulated labels coms sims =
   fixOutPoses labels $ addLabels coms sims
+  -- TODO Fix zeros.  It's not trivial what this even means...
 
 simulate :: (Map String Int) -> [Command] -> [Command]
 simulate labels coms =
