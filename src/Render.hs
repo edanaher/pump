@@ -88,10 +88,13 @@ render srcs (com@(Com op src size osize pos opos), bytes) =
   let origsrc = case src of
         SrcLua (f, n) -> Just $ srcs !! (n - 1)
         _ -> Nothing
+      bytes' = case bytes of
+        BZero _ -> Char8.pack "Zero"
+        Bytes b -> b
   in
   -- TODO: actually use the origsrc.  It breaks weirdly right now.
   --printf "--[[%3d=>%3d +%2d=>%2d]] %s -- %s" pos opos size osize (renderCom {-origsrc-}Nothing com) (show origsrc)
-  printf "--[[%3d=>%3d +%2d=>%2d]] %s" pos opos size osize (renderCom {-origsrc-}Nothing com)
+  printf "--[[%3d=>%3d +%2d=>%2d]] %s -- %s" pos opos size osize (renderCom {-origsrc-}Nothing com) (show $ LBytes bytes')
 
 alignFields labels (input, ibytes) (output, obytes) =
   case (input ^. op, output ^. op) of
@@ -126,18 +129,13 @@ collapseCopies labels inputs outputs =
       startsCopy (SrcCopy _ 0 _) = True
       startsCopy _ = False
       getSrc (SrcCopy (SrcedOp (op, _)) _ _) = op
-      similar op1 op2 = case (op1, op2) of
-        (Zero ranges1, Zero ranges2) ->
-           let evalRange (a, b) = (a @! labels, b @! labels) in
-           map evalRange ranges1 == map evalRange ranges2
-        _ -> op1 == op2
       prefixMatch _ [] = True
       prefixMatch [] _ = False
-      prefixMatch ((c,_):cs) ((t,todousebytes):ts) = (c ^. op) `similar` (t ^. op) && prefixMatch cs ts
+      prefixMatch ((c,cb):cs) ((t,tb):ts) = cb == tb && prefixMatch cs ts
       substCopies input output = case (input, output) of
         ((i,ib):input', (o,ob):output') ->
           if startsCopy (i ^. src) then
-            let copies = filter (prefixMatch input . snd) copyCandidates in
+            let copies = filter (prefixMatch output . snd) copyCandidates in
             case copies of
               [] -> let (input'', output'') = substCopies input' output'
                     in ((i,ib):input'', (o,ob):output'')
