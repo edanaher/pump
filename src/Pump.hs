@@ -430,12 +430,12 @@ compile filename outfileOpt simulate simfileOpt rawsim = do
   putStrLn $ "\n===== Final labels: ======\n" ++ (unlines $ map (\(l, n) -> l ++ ": " ++ show n) $ sortBy (\a b -> snd a `compare` snd b) $ Map.assocs labels)
   putStrLn $ "\n===== Final code: ======\n" ++ (unlines $ map show zeroed)
   --putStrLn $ "\n===== Final code expanded: ======\n" ++ (unlines $ map (Render.render (lines source) . fst) zeroed)
-  simulated <- return $ Simulate.simulate labels decloned
+  simulated <- return $ Simulate.simulate labels zeroed
   putStrLn $ "\n===== Simulation: ======\n" ++ (unlines $ map show simulated )
   --putStrLn $ "\n===== Simulation expanded: ======\n" ++ (unlines $ map (Render.render (lines source)) simulated)
   writeGzip outfile zeroed
   if simulate then do
-    (input, output) <- return $ Render.renderProgram (lines source) labels decloned simulated rawsim
+    (input, output) <- return $ Render.renderProgram (lines source) labels zeroed simulated rawsim
     writeFile (simfile ++ ".in") $ unlines input
     writeFile (simfile ++ ".out") $ unlines output
   else

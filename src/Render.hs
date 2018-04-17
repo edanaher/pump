@@ -83,8 +83,8 @@ renderCom origsrc com = case com ^. op of
   _ -> show $ com ^. op
 
 
-render :: [String] -> Command -> String
-render srcs com@(Com op src size osize pos opos) =
+render :: [String] -> ComByte -> String
+render srcs (com@(Com op src size osize pos opos), bytes) =
   let origsrc = case src of
         SrcLua (f, n) -> Just $ srcs !! (n - 1)
         _ -> Nothing
@@ -93,15 +93,15 @@ render srcs com@(Com op src size osize pos opos) =
   --printf "--[[%3d=>%3d +%2d=>%2d]] %s -- %s" pos opos size osize (renderCom {-origsrc-}Nothing com) (show origsrc)
   printf "--[[%3d=>%3d +%2d=>%2d]] %s" pos opos size osize (renderCom {-origsrc-}Nothing com)
 
-alignFields labels input output =
+alignFields labels (input, ibytes) (output, obytes) =
   case (input ^. op, output ^. op) of
     (Rep _ _ iat _ ifinal, Rep _ _ oat _ ofinal) ->
       let at' = case (iat, oat) of
             (Just a, Nothing) | a @! labels == input ^. opos  -> iat
             _ -> iat
-      in output & ((op . at) .~ at')
+      in (output & ((op . at) .~ at'), obytes)
 
-    _ -> output
+    _ -> (output, obytes)
 
 checkCopy [] _ _ _ = []
 checkCopy (h:r) copysrc start n = case h ^. src of
@@ -111,15 +111,16 @@ checkCopy (h:r) copysrc start n = case h ^. src of
     else checkCopy r copysrc start (n + 1)
   _ -> []
 
+collapseCopies :: LabelMap -> [ComByte] -> [ComByte] -> ([ComByte], [ComByte])
 collapseCopies labels inputs outputs =
-  let copies = map (^. src) $ filter (\com -> case com ^. src of SrcCopy _ _ _ -> True; _ -> False) inputs
+  let copies = map ((^. src) . fst) $ filter (\(com, _) -> case com ^. src of SrcCopy _ _ _ -> True; _ -> False) inputs
       copyIndices = nub $ map (\ (SrcCopy (SrcedOp (Copy from len, _)) _ _) -> (from, len)) copies
-      dropLabels = filter (\com -> case com ^. op of Label _ -> False; _ -> True)
-      copyCandidates :: [((Address, Address), [Command])]
+      dropLabels = filter (\(com, _) -> case com ^. op of Label _ -> False; _ -> True)
+      copyCandidates :: [((Address, Address), [ComByte])]
       copyCandidates = concatMap (\ (start, len) ->
-          let suffix = dropWhile (\com -> com ^. pos /= start @!labels) outputs
-              range = takeWhile (\com -> com ^. pos <= start @! labels + len @! labels) suffix
-          in if range == [] || (last range ^. pos /= start @! labels + len @! labels)
+          let suffix = dropWhile (\(com, _) -> com ^. pos /= start @!labels) outputs
+              range = takeWhile (\(com, _) -> com ^. pos <= start @! labels + len @! labels) suffix
+          in if range == [] || (fst (last range) ^. pos /= start @! labels + len @! labels)
             then []
             else [((start, len), dropLabels (init range))]) copyIndices
       startsCopy (SrcCopy _ 0 _) = True
@@ -132,35 +133,35 @@ collapseCopies labels inputs outputs =
         _ -> op1 == op2
       prefixMatch _ [] = True
       prefixMatch [] _ = False
-      prefixMatch (c:cs) (t:ts) = (c ^. op) `similar` (t ^. op) && prefixMatch cs ts
+      prefixMatch ((c,_):cs) ((t,todousebytes):ts) = (c ^. op) `similar` (t ^. op) && prefixMatch cs ts
       substCopies input output = case (input, output) of
-        (i:input', o:output') ->
+        ((i,ib):input', (o,ob):output') ->
           if startsCopy (i ^. src) then
             let copies = filter (prefixMatch input . snd) copyCandidates in
             case copies of
               [] -> let (input'', output'') = substCopies input' output'
-                    in (i:input'', o:output'')
+                    in ((i,ib):input'', (o,ob):output'')
               (((start, len), copy):_) ->
                    let (input'', output'') = substCopies (drop (length copy) input) (drop (length copy) output)
-                   in (Com (getSrc $ i ^. src) SrcNone 0 0 0 0:input'',
-                       Com (Copy start len) SrcNone 0 0 0 0:output'')
+                   in ((Com (getSrc $ i ^. src) SrcNone 0 0 0 0, Bytes (Char8.pack "")):input'',
+                       (Com (Copy start len) SrcNone 0 0 0 0, Bytes (Char8.pack "")):output'')
 
           else
             let (input'', output'') = substCopies input' output'
-            in (i:input'', o:output'')
+            in ((i,ib):input'', (o,ob):output'')
         _ -> (input, output)
 --  in trace ("copies are \n" ++ unlines (map (\(src, lines) -> show src ++ " => \n" ++ unlines (map show lines) ++ "\n\n") copies)) outputs
   in {--trace ("Copy indices: " ++ show copyIndices ++ " => candidates " ++ unlines (map (\((start, len), coms) -> show start ++ "+" ++ show len ++ "\n" ++ unlines (map show coms) ++ "\n" ) copyCandidates)) --} substCopies inputs outputs
 
-cleanup :: LabelMap -> [Command] -> [Command] -> ([Command], [Command])
+cleanup :: LabelMap -> [ComByte] -> [ComByte] -> ([ComByte], [ComByte])
 cleanup labels inputs outputs =
-  let paired = zip (inputs ++ repeat (Com (Padding 0) SrcNone 0 0 0 0)) outputs -- This should be smarter
+  let paired = zip (inputs ++ repeat (Com (Padding 0) SrcNone 0 0 0 0, Bytes (Char8.pack ""))) outputs -- This should be smarter
       cleaned = map (uncurry $ alignFields labels) paired
       decopied = collapseCopies labels inputs cleaned
   in
   decopied
 
-renderProgram :: [String] -> LabelMap -> [Command] -> [Command] -> Bool -> ([String], [String])
+renderProgram :: [String] -> LabelMap -> [ComByte] -> [ComByte] -> Bool -> ([String], [String])
 renderProgram srcs labels inputs outputs rawsim =
   let (inputs', outputs') = if rawsim then (inputs, outputs) else cleanup labels inputs outputs
   in (map (render srcs) inputs', map (render srcs) outputs')

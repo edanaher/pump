@@ -103,6 +103,8 @@ data ByteOp =
   | BZero [(Int, Int)]
   deriving (Eq, Show)
 
+type ComByte = (Command, ByteOp)
+
 newtype DslErr = DslErr (String, String, Int)
   deriving Eq
 
