@@ -3,7 +3,7 @@ module Simulate where
 
 import Language
 import qualified Data.ByteString.Char8 as Char8
-import Data.List (mapAccumL)
+import Data.List (mapAccumL, nub)
 import Debug.Trace (trace)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -79,10 +79,42 @@ fixOutPoses labels sims = snd $ mapAccumL (\ (opos, eatlen) (Com op src size osi
           opos + osize'
   in ((opos', eatlen'), (Com op src size osize' pos opos, bytes))) (-1, 0) sims
 
+extractBytes :: LabelMap -> [ComByte] -> [(Address, Address)] -> Int -> Int -> [ByteOp]
+extractBytes labels prog ranges from to =
+  let suffix = dropWhile (\ (Com _ _ _ _ pos _, _) -> pos < from) prog
+      range = takeWhile (\ (Com _ _ _ _ pos _, _) -> pos < to) suffix
+      evalRanges = map $ \(a, b) -> (a @! labels, b @! labels)
+      withHoles = map (\ (com, bytes) -> case com ^. op of
+            Zero ranges' | ranges == ranges' -> BZero (evalRanges ranges)
+            _ -> bytes) range
+      compacted = (\(bytes, out) -> reverse (Bytes bytes:out)) $ foldl (\(curBytes, out) bytes ->
+        case bytes of
+          BZero _ -> if Char8.length curBytes == 0
+                     then (Char8.pack "", bytes:out)
+                     else (Char8.pack "", bytes:Bytes curBytes:out)
+          Bytes b -> (curBytes `Char8.append` b, out)
+        ) (Char8.pack "", []) withHoles
+  in
+  compacted
+
+annotateZeros :: LabelMap -> [ComByte] -> [(Op, [[ByteOp]])]
+annotateZeros labels coms =
+  let zerocoms = filter (\(com, bytes) -> case com ^. op of Zero _ -> True; _ -> False) coms
+      zeros = nub $ map (\(com, bytes) -> com ^. op) zerocoms
+      annotatedZeros = map (\(Zero ranges) -> (Zero ranges, map (\(start, end) -> extractBytes labels coms ranges (start @! labels) (end @! labels)) ranges)) zeros
+  in
+    annotatedZeros
+
+fixZeros :: LabelMap -> [ComByte] -> [ComByte] -> [ComByte]
+fixZeros labels coms sims =
+  let comZeros = annotateZeros labels coms
+      simZeros = annotateZeros labels sims
+  in
+  trace ("Fixing zeros: \n" ++ unlines (map show comZeros)  ++ "\n  vs\n" ++ unlines (map show simZeros)) sims
+
 fixUpSimulated :: (Map String Int) -> [ComByte] -> [ComByte] -> [ComByte]
 fixUpSimulated labels coms sims =
-  fixOutPoses labels $ addLabels coms sims
-  -- TODO Fix zeros.  It's not trivial what this even means...
+  fixZeros labels coms $ fixOutPoses labels $ addLabels coms sims
 
 simulate :: (Map String Int) -> [ComByte] -> [ComByte]
 simulate labels coms =

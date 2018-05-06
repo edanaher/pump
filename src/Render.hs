@@ -72,7 +72,6 @@ renderCom origsrc com = case com ^. op of
   Zero ranges ->
     let lranges = intercalate ", " $ map (\(a, b) -> "{ " ++ show (LAddress a) ++ ", " ++ show (LAddress b) ++ "}") ranges
         args = renderArgs $ Map.fromList $ [("ranges", LRaw $ "{" ++ lranges ++ "}")]
-    -- TODO: Until simulating  fixes zeros properly, the args aren't completely meaningful :(
     in "zero " ++ args
   DataInt value size ->
     let args = renderArgs $ Map.fromList $ [("int", LAddress value), ("size", LInt size)]
