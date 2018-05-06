@@ -20,7 +20,7 @@ data Address =
   | AddrL String
   | AddrSum Address Address
   | AddrDiff Address Address
-  deriving (Eq, Data, Typeable)
+  deriving (Eq, Data, Typeable, Ord)
 
 instance Show Address where
   show addr = case addr of
@@ -52,7 +52,7 @@ data Op =
   | Clone { _index :: Int }
   | Label { _label :: String }
   | Padding Int
-  deriving  (Eq, Data, Typeable)
+  deriving  (Eq, Data, Typeable, Ord)
 
 makeLenses ''Op
 
