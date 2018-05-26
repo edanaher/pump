@@ -2,6 +2,7 @@
 module Simulate where
 
 import Language
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as Char8
 import Data.List (mapAccumL, nub, find)
 import Debug.Trace (trace)
@@ -81,11 +82,11 @@ fixOutPoses labels sims = snd $ mapAccumL (\ (opos, eatlen) (Com op src size osi
           opos + osize'
   in ((opos', eatlen'), (Com op src size osize' pos opos, bytes))) (-1, 0) sims
 
-extractBytes :: LabelMap -> [ComByte] -> [(Address, Address)] -> Int -> Int -> ByteOp
+extractBytes :: LabelMap -> [ComByte] -> [(Address, Address)] -> Int -> Int -> B.ByteString
 extractBytes labels prog ranges from to =
   let suffix = dropWhile (\ (Com _ _ _ _ pos _, _) -> pos < from) prog
       range = takeWhile (\ (Com _ _ _ _ pos _, _) -> pos < to) suffix
-      compacted = Bytes $ foldl Char8.append Char8.empty $ reverse $ map (\(com, bytes) ->
+      compacted = foldl Char8.append Char8.empty $ reverse $ map (\(com, bytes) ->
         case bytes of
           Bytes b -> b
           BZero _ -> error "Zero left in bytes on simulation"
@@ -93,25 +94,80 @@ extractBytes labels prog ranges from to =
   in
   compacted
 
-annotateZeros :: LabelMap -> [ComByte] -> [(Op, [ByteOp])]
+annotateZeros :: LabelMap -> [ComByte] -> [(Op, [(Int, B.ByteString)])]
 annotateZeros labels coms =
   let zerocoms = filter (\(com, bytes) -> case com ^. op of Zero _ -> True; _ -> False) coms
       zeros = nub $ map (\(com, bytes) -> com ^. op) zerocoms
-      annotatedZeros = map (\(Zero ranges) -> (Zero ranges, map (\(start, end) -> extractBytes labels coms ranges (start @! labels) (end @! labels)) ranges)) zeros
+      annotatedZeros = map (\(Zero ranges) -> (Zero ranges, map (\(start, end) -> (start @! labels, extractBytes labels coms ranges (start @! labels) (end @! labels))) ranges)) zeros
   in
     annotatedZeros
 
-correlateZeros :: [(Op, [ByteOp])] -> [(Op, [ByteOp])] -> Map Op Op
-correlateZeros comZeros simZeros =
-  let findMatch (zero, bytes) = liftM (\p -> (fst p, zero)) $ find (\(simzero, simbytes) -> simbytes == bytes) simZeros
+correlateSomeZeros :: [(Op, [(Int, B.ByteString)])] -> [(Op, [(Int, B.ByteString)])] -> [[(Int, Int)]]-> Map Op Op
+correlateSomeZeros comZeros simZeros zeroedRanges =
+  let
+    containsRange :: [(Int, B.ByteString)] -> (Int, Int) -> Bool
+    containsRange ranges (start, finish) =
+      any (\(s, bs) -> s < start && finish < s + B.length bs) ranges
+    containsRanges :: [(Int, B.ByteString)] -> [(Int, Int)]  -> Bool
+    containsRanges outer inner =
+      all (containsRange outer) inner
+    -- Note that this is m*n, when it should be m+n with sorted inputs.  It might matter later?
+    zeroBytes :: [[(Int, Int)]] -> (Int, B.ByteString) -> (Int, B.ByteString)
+    zeroBytes zranges (start, bytes) =
+      let bytes' = foldl (\ bytes (s, f) ->
+              if start < s && f < start + B.length bytes then
+                let prefix = B.take (s - start) bytes
+                    suffix = B.drop (f - start) bytes
+                    middle = B.replicate (f - s) 0
+                    result = B.concat [prefix, middle, suffix]
+                in
+                trace ("Zeroing bytes " ++ show (s, f) ++ " in\n" ++ show (start, bytes) ++ "\nto\n" ++ show result)
+                result
+              else
+                bytes
+            ) bytes (concat zranges)
+      in
+      trace ("Zeroing " ++ show zranges ++ " in " ++ show (start, bytes))
+      (start, bytes')
+    zeroAlreadyZeroed :: [(Int, B.ByteString)]  -> [(Int, B.ByteString)]
+    zeroAlreadyZeroed ranges =
+      let zranges = filter (containsRanges ranges) zeroedRanges
+      in map (zeroBytes zranges) ranges
+    matchZeros :: [(Int, B.ByteString)] -> [(Int, B.ByteString)] -> Bool
+    matchZeros bytes simbytes = case (bytes, simbytes) of
+      ([], []) -> True
+      ((start, _):_, (start', _):_) -> trace ("Comparing\n" ++ show bytes ++ "\nwith\n" ++ show simbytes )all (\((s, b), (s', b')) -> s - start == s' - start' && b == b') (zip bytes simbytes)
+      _ -> False
+    findMatch (zero, bytes) = liftM (\p -> (fst p, zero)) $ find (\(simzero, simbytes) -> matchZeros (zeroAlreadyZeroed bytes) (zeroAlreadyZeroed simbytes)) simZeros
   in
   Map.fromList $ map fromJust $ filter isJust $ map findMatch comZeros
+
+zeroZeroedRanges :: [(Int, Int)] -> (Op, [(Int, B.ByteString)]) -> (Op, [(Int, B.ByteString)])
+zeroZeroedRanges zeroed (op, ranges) =
+  (op, flip map ranges $ \(start, bytes) ->
+    (start, bytes)
+  )
+
+correlateZeros :: LabelMap -> [(Op, [(Int, B.ByteString)])] -> [(Op, [(Int, B.ByteString)])] -> Map Op Op
+correlateZeros labels comZeros simZeros =
+  let correlateZeros' comZeros simZeros zeroedRanges =
+        let zeroMap = correlateSomeZeros comZeros simZeros zeroedRanges
+            zeroToInts (Zero ranges) = map (\(a,b) -> (a @! labels, b @! labels)) ranges
+            ranges = map (\(sim, com) -> zeroToInts sim) $ Map.toList zeroMap
+            simZeros' = filter (\(z, _) -> Map.notMember z zeroMap) simZeros
+        in
+        trace ("  ranges: " ++ show ranges ++ "; simZeros': " ++ show simZeros') $
+        if simZeros == simZeros' then zeroMap else
+        zeroMap `Map.union` correlateZeros' comZeros simZeros' (zeroedRanges ++ ranges)
+  in
+  correlateZeros' comZeros simZeros []
+
 
 fixZeros :: LabelMap -> [ComByte] -> [ComByte] -> [ComByte]
 fixZeros labels coms sims =
   let comZeros = annotateZeros labels coms
       simZeros = annotateZeros labels sims
-      zeroMap = correlateZeros comZeros simZeros
+      zeroMap = correlateZeros labels comZeros simZeros
       fixZero (com, bytes) = case com ^. op of
         Zero ranges -> case Map.lookup (Zero ranges) zeroMap of
           Nothing -> (com & op .~ Zero [], bytes)
